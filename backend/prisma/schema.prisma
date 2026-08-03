@@ -18,6 +18,20 @@ enum CategoryType {
   expense
 }
 
+enum ConversationAction {
+  income
+  expense
+  transfer
+}
+
+enum ConversationStep {
+  transaction_wallet
+  transaction_details
+  transfer_source_wallet
+  transfer_destination_wallet
+  transfer_details
+}
+
 model User {
   id               String        @id @default(uuid())
   telegramId       BigInt        @unique
@@ -31,6 +45,7 @@ model User {
   wallets          Wallet[]
   categories       Category[]
   transactions     Transaction[]
+  conversation     Conversation?
   createdAt        DateTime      @default(now())
   updatedAt        DateTime      @updatedAt
 
@@ -115,4 +130,17 @@ model Attachment {
 
   @@index([transactionId])
   @@map("attachments")
+}
+
+model Conversation {
+  id        String             @id @default(uuid())
+  userId    String             @unique
+  action    ConversationAction
+  step      ConversationStep
+  data      Json               @default("{}")
+  user      User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime           @default(now())
+  updatedAt DateTime           @updatedAt
+
+  @@map("conversations")
 }

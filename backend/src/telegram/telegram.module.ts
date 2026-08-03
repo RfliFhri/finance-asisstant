@@ -8,6 +8,7 @@ import { CategoriesModule } from '../categories/categories.module';
 import { TransactionsModule } from '../transactions/transactions.module';
 import { ReportsModule } from '../reports/reports.module';
 import { AttachmentsModule } from '../attachments/attachments.module';
+import { ConversationsModule } from '../conversations/conversations.module';
 
 @Module({
   imports: [
@@ -17,6 +18,7 @@ import { AttachmentsModule } from '../attachments/attachments.module';
     TransactionsModule,
     ReportsModule,
     AttachmentsModule,
+    ConversationsModule,
   ],
   controllers: [TelegramController],
   providers: [TelegramService],

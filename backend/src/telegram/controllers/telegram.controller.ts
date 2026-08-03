@@ -16,6 +16,10 @@ import { UsersService } from '../../users/users.service';
 import { WalletsService } from '../../wallets/wallets.service';
 import { TelegramService } from '../services/telegram.service';
 import { ConfigService } from '@nestjs/config';
+import {
+  ActiveConversation,
+  ConversationsService,
+} from '../../conversations/conversations.service';
 
 @Controller('telegram')
 export class TelegramController {
@@ -30,6 +34,7 @@ export class TelegramController {
     private readonly reports: ReportsService,
     private readonly attachments: AttachmentsService,
     private readonly config: ConfigService,
+    private readonly conversations: ConversationsService,
   ) {}
 
   @Post('webhook')
@@ -88,9 +93,36 @@ export class TelegramController {
   }
 
   private async handleCommand(userId: string, chatId: number, text: string) {
+    if (text.toLowerCase() === '/cancel') {
+      await this.conversations.clear(userId);
+      return this.telegram.sendMessage(
+        chatId,
+        'Input dibatalkan. Pilih menu untuk mulai lagi.',
+        this.mainMenu(),
+      );
+    }
+
     const [command, ...args] = text.split(/\s+/);
+    if (['➕', '➕ catat pemasukan'].includes(text.toLowerCase())) {
+      return this.startTransactionFlow(userId, chatId, 'income');
+    }
+    if (['➖', '➖ catat pengeluaran'].includes(text.toLowerCase())) {
+      return this.startTransactionFlow(userId, chatId, 'expense');
+    }
+    if (['↔️', '↔️ transfer'].includes(text.toLowerCase())) {
+      return this.startTransferFlow(userId, chatId);
+    }
+
+    if (!text.startsWith('/')) {
+      const conversation = await this.conversations.get(userId);
+      if (conversation) {
+        return this.continueConversation(userId, chatId, text, conversation);
+      }
+    }
+
     switch (command.toLowerCase()) {
       case '/start':
+        await this.conversations.clear(userId);
         await this.wallets.ensureDefault(userId);
         await this.categories.ensureDefaults(userId);
         return this.telegram.sendMessage(
@@ -119,6 +151,7 @@ export class TelegramController {
           args,
         );
       case '/transfer':
+        if (!args.length) return this.startTransferFlow(userId, chatId);
         return this.transferCommand(userId, chatId, args);
       case '/report':
         return this.reportCommand(userId, chatId, args[0]);
@@ -135,15 +168,6 @@ export class TelegramController {
       case '🧾':
       case '🧾 riwayat':
         return this.historyCommand(userId, chatId);
-      case '➕':
-      case '➕ catat pemasukan':
-        return this.transactionHint(chatId, 'income');
-      case '➖':
-      case '➖ catat pengeluaran':
-        return this.transactionHint(chatId, 'expense');
-      case '↔️':
-      case '↔️ transfer':
-        return this.transferHint(chatId);
       case '❓':
       case '❓ bantuan':
         return this.telegram.sendMessage(chatId, this.help(), this.mainMenu());
@@ -153,6 +177,167 @@ export class TelegramController {
           `Perintah tidak dikenal.\n\n${this.help()}`,
         );
     }
+  }
+
+  private async startTransactionFlow(
+    userId: string,
+    chatId: number,
+    action: 'income' | 'expense',
+  ) {
+    const wallets = await this.wallets.listWithBalances(userId);
+    if (!wallets.length) {
+      return this.telegram.sendMessage(
+        chatId,
+        'Belum ada wallet. Buat dulu dengan /wallet add Nama.',
+      );
+    }
+    if (wallets.length === 1) {
+      return this.askTransactionDetails(
+        userId,
+        chatId,
+        action,
+        wallets[0].name,
+      );
+    }
+    await this.conversations.save(userId, action, 'transaction_wallet');
+    return this.telegram.sendMessage(
+      chatId,
+      'Pilih rekening/wallet untuk transaksi ini:',
+      this.walletMenu(wallets.map((wallet) => wallet.name)),
+    );
+  }
+
+  private async askTransactionDetails(
+    userId: string,
+    chatId: number,
+    action: 'income' | 'expense',
+    walletName: string,
+  ) {
+    await this.conversations.save(userId, action, 'transaction_details', {
+      walletName,
+    });
+    const label = action === 'income' ? 'pemasukan' : 'pengeluaran';
+    const category = action === 'income' ? 'Gaji' : 'Makan';
+    return this.telegram.sendMessage(
+      chatId,
+      `Rekening terpilih: ${walletName}.\n\nKirim ${label} dengan format:\n${category} | 150000 | Keterangan opsional\n\nKirim /cancel untuk membatalkan.`,
+    );
+  }
+
+  private async startTransferFlow(userId: string, chatId: number) {
+    const wallets = await this.wallets.listWithBalances(userId);
+    if (!wallets.length) {
+      return this.telegram.sendMessage(
+        chatId,
+        'Belum ada wallet. Buat dulu dengan /wallet add Nama.',
+      );
+    }
+    await this.conversations.save(userId, 'transfer', 'transfer_source_wallet');
+    return this.telegram.sendMessage(
+      chatId,
+      'Transfer dari wallet mana?\nContoh: Cash\n\nKirim /cancel untuk membatalkan.',
+      this.walletMenu(wallets.map((wallet) => wallet.name)),
+    );
+  }
+
+  private async continueConversation(
+    userId: string,
+    chatId: number,
+    text: string,
+    conversation: ActiveConversation,
+  ) {
+    if (conversation.step === 'transaction_wallet') {
+      const wallet = await this.wallets.findByName(userId, text);
+      return this.askTransactionDetails(
+        userId,
+        chatId,
+        conversation.action as 'income' | 'expense',
+        wallet.name,
+      );
+    }
+
+    if (conversation.step === 'transaction_details') {
+      const [categoryName, rawAmount, ...description] =
+        this.parseTextFields(text);
+      if (!categoryName || !rawAmount) {
+        return this.telegram.sendMessage(
+          chatId,
+          'Format belum lengkap. Kirim: Kategori | Nominal | Keterangan opsional',
+        );
+      }
+      const transaction = await this.transactions.create(userId, {
+        type: conversation.action as 'income' | 'expense',
+        walletName: conversation.data.walletName,
+        categoryName,
+        amount: this.amount(rawAmount),
+        description: description.join(' | ').trim() || '-',
+      });
+      await this.conversations.clear(userId);
+      return this.telegram.sendMessage(
+        chatId,
+        `✅ ${conversation.action === 'income' ? 'Pemasukan' : 'Pengeluaran'} Rp${Number(transaction.amount).toLocaleString('id-ID')} tersimpan di ${conversation.data.walletName}.`,
+        this.mainMenu(),
+      );
+    }
+
+    if (conversation.step === 'transfer_source_wallet') {
+      const wallet = await this.wallets.findByName(userId, text);
+      await this.conversations.save(
+        userId,
+        'transfer',
+        'transfer_destination_wallet',
+        {
+          fromWalletName: wallet.name,
+        },
+      );
+      const wallets = await this.wallets.listWithBalances(userId);
+      return this.telegram.sendMessage(
+        chatId,
+        'Transfer ke wallet mana?',
+        this.walletMenu(
+          wallets
+            .filter((item) => item.id !== wallet.id)
+            .map((item) => item.name),
+        ),
+      );
+    }
+
+    if (conversation.step === 'transfer_destination_wallet') {
+      const wallet = await this.wallets.findByName(userId, text);
+      if (wallet.name === conversation.data.fromWalletName) {
+        return this.telegram.sendMessage(
+          chatId,
+          'Wallet tujuan harus berbeda. Coba lagi.',
+        );
+      }
+      await this.conversations.save(userId, 'transfer', 'transfer_details', {
+        ...conversation.data,
+        toWalletName: wallet.name,
+      });
+      return this.telegram.sendMessage(
+        chatId,
+        'Berapa nominal transfernya?\nFormat: Nominal | Keterangan opsional\nContoh: 50000 | Isi saldo',
+      );
+    }
+
+    const [rawAmount, ...description] = this.parseTextFields(text);
+    if (!rawAmount)
+      return this.telegram.sendMessage(
+        chatId,
+        'Kirim nominal transfer. Contoh: 50000 | Isi saldo',
+      );
+    const transaction = await this.transactions.transfer(userId, {
+      fromWalletName: conversation.data.fromWalletName,
+      toWalletName: conversation.data.toWalletName,
+      amount: this.amount(rawAmount),
+      description: description.join(' | ').trim() || '-',
+    });
+    await this.conversations.clear(userId);
+    return this.telegram.sendMessage(
+      chatId,
+      `✅ Transfer Rp${Number(transaction.amount).toLocaleString('id-ID')} tersimpan.`,
+      this.mainMenu(),
+    );
   }
 
   private async walletCommand(userId: string, chatId: number, args: string[]) {
@@ -349,25 +534,14 @@ export class TelegramController {
   }
 
   private parseFields(args: string[]) {
-    const input = args.join(' ').trim();
-    return input.includes('|')
-      ? input.split('|').map((value) => value.trim())
-      : args;
+    return this.parseTextFields(args.join(' '));
   }
 
-  private transactionHint(chatId: number, type: 'income' | 'expense') {
-    const label = type === 'income' ? 'pemasukan' : 'pengeluaran';
-    return this.telegram.sendMessage(
-      chatId,
-      `Kirim ${label} dengan format ini:\n/${type} Cash | ${type === 'income' ? 'Gaji' : 'Makan'} | 25000 | Keterangan\n\nTanda | membuat nama wallet, kategori, dan keterangan boleh mengandung spasi.`,
-    );
-  }
-
-  private transferHint(chatId: number) {
-    return this.telegram.sendMessage(
-      chatId,
-      'Kirim transfer dengan format ini:\n/transfer Cash | BCA | 50000 | Isi saldo',
-    );
+  private parseTextFields(input: string) {
+    const normalized = input.trim();
+    return normalized.includes('|')
+      ? normalized.split('|').map((value) => value.trim())
+      : normalized.split(/\s+/);
   }
 
   private mainMenu() {
@@ -380,6 +554,16 @@ export class TelegramController {
           ['❓ Bantuan'],
         ],
         resize_keyboard: true,
+      },
+    };
+  }
+
+  private walletMenu(walletNames: string[]) {
+    return {
+      reply_markup: {
+        keyboard: [...walletNames.map((name) => [name]), ['/cancel']],
+        resize_keyboard: true,
+        one_time_keyboard: true,
       },
     };
   }
