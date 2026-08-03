@@ -56,6 +56,7 @@ export class TelegramController {
       lastName: message.from.last_name,
       languageCode: message.from.language_code,
     });
+    void this.telegram.sendTyping(message.chat.id).catch(() => undefined);
     try {
       if (message.text) {
         await this.handleCommand(user.id, message.chat.id, message.text.trim());
@@ -73,13 +74,38 @@ export class TelegramController {
   }
 
   private async handleAttachment(userId: string, chatId: number, message: any) {
+    const conversation = await this.conversations.get(userId);
+    const file = message.document ?? message.photo?.[message.photo.length - 1];
+    if (
+      conversation?.action === 'attachment' &&
+      conversation.step === 'attachment_upload'
+    ) {
+      if (!file)
+        return this.telegram.sendMessage(chatId, 'Lampiran tidak ditemukan.');
+      await this.attachments.createForUser(
+        userId,
+        conversation.data.transactionId,
+        {
+          telegramFileId: file.file_id,
+          telegramFileUniqueId: file.file_unique_id,
+          fileName: message.document?.file_name,
+          mimeType: message.document?.mime_type,
+          fileSize: file.file_size,
+        },
+      );
+      await this.conversations.clear(userId);
+      return this.telegram.sendMessage(
+        chatId,
+        '✅ Struk berhasil disimpan ke transaksi.',
+        this.mainMenu(),
+      );
+    }
     const match = message.caption?.trim().match(/^\/attach\s+([\w-]+)$/i);
     if (!match)
       return this.telegram.sendMessage(
         chatId,
         'Kirim foto atau dokumen dengan caption: /attach ID_TRANSAKSI',
       );
-    const file = message.document ?? message.photo?.[message.photo.length - 1];
     if (!file)
       return this.telegram.sendMessage(chatId, 'Lampiran tidak ditemukan.');
     await this.attachments.createForUser(userId, match[1], {
@@ -112,6 +138,29 @@ export class TelegramController {
     if (['↔️', '↔️ transfer'].includes(text.toLowerCase())) {
       return this.startTransferFlow(userId, chatId);
     }
+    if (text === '💼 Kelola Wallet') return this.showWalletMenu(chatId);
+    if (text === '➕ Tambah Rekening')
+      return this.startWalletName(userId, chatId);
+    if (text === '✏️ Ubah Nama Rekening')
+      return this.startWalletRename(userId, chatId);
+    if (text === '🗑 Hapus Rekening')
+      return this.startWalletDelete(userId, chatId);
+    if (text === '🏷️ Kelola Kategori') return this.showCategoryMenu(chatId);
+    if (text === '➕ Kategori Pemasukan')
+      return this.startCategoryName(userId, chatId, 'income');
+    if (text === '➖ Kategori Pengeluaran')
+      return this.startCategoryName(userId, chatId, 'expense');
+    if (text === '📊 Laporan') return this.showReportMenu(chatId);
+    if (text === '📅 Hari ini')
+      return this.reportCommand(userId, chatId, 'daily');
+    if (text === '📅 Minggu ini')
+      return this.reportCommand(userId, chatId, 'weekly');
+    if (text === '📅 Bulan ini')
+      return this.reportCommand(userId, chatId, 'monthly');
+    if (text === '📅 Tahun ini')
+      return this.reportCommand(userId, chatId, 'yearly');
+    if (text === '📎 Upload Struk')
+      return this.startAttachmentFlow(userId, chatId);
 
     if (!text.startsWith('/')) {
       const conversation = await this.conversations.get(userId);
@@ -179,6 +228,104 @@ export class TelegramController {
     }
   }
 
+  private showWalletMenu(chatId: number) {
+    return this.telegram.sendMessage(
+      chatId,
+      'Kelola rekening Anda:',
+      this.walletManagementMenu(),
+    );
+  }
+
+  private async startWalletName(userId: string, chatId: number) {
+    await this.conversations.save(userId, 'wallet', 'wallet_name');
+    return this.telegram.sendMessage(
+      chatId,
+      'Tulis nama rekening atau wallet baru.\nContoh: BCA, Mandiri, GoPay, atau Cash.',
+    );
+  }
+
+  private async startWalletRename(userId: string, chatId: number) {
+    const wallets = await this.wallets.listWithBalances(userId);
+    if (!wallets.length)
+      return this.telegram.sendMessage(chatId, 'Belum ada wallet.');
+    await this.conversations.save(userId, 'wallet', 'wallet_select_rename');
+    return this.telegram.sendMessage(
+      chatId,
+      'Pilih rekening yang ingin diubah namanya:',
+      this.walletMenu(wallets.map((wallet) => wallet.name)),
+    );
+  }
+
+  private async startWalletDelete(userId: string, chatId: number) {
+    const wallets = await this.wallets.listWithBalances(userId);
+    if (!wallets.length)
+      return this.telegram.sendMessage(chatId, 'Belum ada wallet.');
+    await this.conversations.save(userId, 'wallet', 'wallet_select_delete');
+    return this.telegram.sendMessage(
+      chatId,
+      'Pilih rekening yang ingin dihapus:',
+      this.walletMenu(wallets.map((wallet) => wallet.name)),
+    );
+  }
+
+  private showCategoryMenu(chatId: number) {
+    return this.telegram.sendMessage(
+      chatId,
+      'Kelola kategori transaksi:',
+      this.categoryManagementMenu(),
+    );
+  }
+
+  private async startCategoryName(
+    userId: string,
+    chatId: number,
+    type: 'income' | 'expense',
+  ) {
+    await this.conversations.save(
+      userId,
+      type === 'income' ? 'category_income' : 'category_expense',
+      'category_name',
+    );
+    return this.telegram.sendMessage(
+      chatId,
+      `Tulis nama kategori ${type === 'income' ? 'pemasukan' : 'pengeluaran'} baru.`,
+    );
+  }
+
+  private showReportMenu(chatId: number) {
+    return this.telegram.sendMessage(
+      chatId,
+      'Pilih periode laporan:',
+      this.reportMenu(),
+    );
+  }
+
+  private async startAttachmentFlow(userId: string, chatId: number) {
+    const transactions = await this.transactions.recent(userId, 10);
+    if (!transactions.length) {
+      return this.telegram.sendMessage(
+        chatId,
+        'Belum ada transaksi untuk diberi struk.',
+      );
+    }
+    const buttons: Record<string, string> = {};
+    for (const [index, transaction] of transactions.entries()) {
+      const label = `${index + 1}. ${transaction.type === 'income' ? 'Pemasukan' : transaction.type === 'expense' ? 'Pengeluaran' : 'Transfer'} · Rp${Number(transaction.amount).toLocaleString('id-ID')}`;
+      buttons[label] = transaction.id;
+    }
+    await this.conversations.save(
+      userId,
+      'attachment',
+      'attachment_transaction',
+      buttons,
+    );
+    return this.telegram.sendMessage(
+      chatId,
+      'Pilih transaksi yang ingin diberi struk:',
+      this.attachmentMenu(Object.keys(buttons)),
+    );
+  }
+
   private async startTransactionFlow(
     userId: string,
     chatId: number,
@@ -192,7 +339,7 @@ export class TelegramController {
       );
     }
     if (wallets.length === 1) {
-      return this.askTransactionDetails(
+      return this.askTransactionCategory(
         userId,
         chatId,
         action,
@@ -207,20 +354,26 @@ export class TelegramController {
     );
   }
 
-  private async askTransactionDetails(
+  private async askTransactionCategory(
     userId: string,
     chatId: number,
     action: 'income' | 'expense',
     walletName: string,
   ) {
-    await this.conversations.save(userId, action, 'transaction_details', {
+    const categories = await this.categories.list(userId, action);
+    if (!categories.length) {
+      return this.telegram.sendMessage(
+        chatId,
+        'Belum ada kategori. Buat dulu dengan /category income Nama atau /category expense Nama.',
+      );
+    }
+    await this.conversations.save(userId, action, 'transaction_category', {
       walletName,
     });
-    const label = action === 'income' ? 'pemasukan' : 'pengeluaran';
-    const category = action === 'income' ? 'Gaji' : 'Makan';
     return this.telegram.sendMessage(
       chatId,
-      `Rekening terpilih: ${walletName}.\n\nKirim ${label} dengan format:\n${category} | 150000 | Keterangan opsional\n\nKirim /cancel untuk membatalkan.`,
+      `Rekening terpilih: ${walletName}.\n\nPilih kategori:`,
+      this.categoryMenu(categories.map((category) => category.name)),
     );
   }
 
@@ -246,13 +399,161 @@ export class TelegramController {
     text: string,
     conversation: ActiveConversation,
   ) {
+    if (conversation.step === 'wallet_name') {
+      const wallet = await this.wallets.create(userId, { name: text });
+      await this.conversations.clear(userId);
+      return this.telegram.sendMessage(
+        chatId,
+        `✅ Rekening ${wallet.name} berhasil ditambahkan.`,
+        this.mainMenu(),
+      );
+    }
+
+    if (conversation.step === 'wallet_select_rename') {
+      const wallet = await this.wallets.findByName(userId, text);
+      await this.conversations.save(userId, 'wallet', 'wallet_new_name', {
+        walletName: wallet.name,
+      });
+      return this.telegram.sendMessage(
+        chatId,
+        'Tulis nama rekening yang baru.',
+      );
+    }
+
+    if (conversation.step === 'wallet_new_name') {
+      await this.wallets.rename(userId, conversation.data.walletName, text);
+      await this.conversations.clear(userId);
+      return this.telegram.sendMessage(
+        chatId,
+        '✅ Nama rekening berhasil diubah.',
+        this.mainMenu(),
+      );
+    }
+
+    if (conversation.step === 'wallet_select_delete') {
+      const wallet = await this.wallets.findByName(userId, text);
+      await this.conversations.save(userId, 'wallet', 'wallet_delete_confirm', {
+        walletName: wallet.name,
+      });
+      return this.telegram.sendMessage(
+        chatId,
+        `Hapus rekening ${wallet.name}? Tindakan ini tidak dapat dibatalkan.`,
+        this.confirmDeleteMenu(),
+      );
+    }
+
+    if (conversation.step === 'wallet_delete_confirm') {
+      if (text !== '✅ Ya, hapus') {
+        await this.conversations.clear(userId);
+        return this.telegram.sendMessage(
+          chatId,
+          'Penghapusan dibatalkan.',
+          this.mainMenu(),
+        );
+      }
+      await this.wallets.delete(userId, conversation.data.walletName);
+      await this.conversations.clear(userId);
+      return this.telegram.sendMessage(
+        chatId,
+        '✅ Rekening berhasil dihapus.',
+        this.mainMenu(),
+      );
+    }
+
+    if (conversation.step === 'category_name') {
+      const type =
+        conversation.action === 'category_income' ? 'income' : 'expense';
+      const category = await this.categories.create(userId, type, text);
+      await this.conversations.clear(userId);
+      return this.telegram.sendMessage(
+        chatId,
+        `✅ Kategori ${category.name} berhasil ditambahkan.`,
+        this.mainMenu(),
+      );
+    }
+
+    if (conversation.step === 'attachment_transaction') {
+      const transactionId = conversation.data[text];
+      if (!transactionId) {
+        return this.telegram.sendMessage(
+          chatId,
+          'Pilih transaksi menggunakan tombol yang tersedia.',
+        );
+      }
+      await this.conversations.save(userId, 'attachment', 'attachment_upload', {
+        transactionId,
+      });
+      return this.telegram.sendMessage(
+        chatId,
+        'Sekarang kirim foto atau dokumen struknya. Tidak perlu menulis caption.',
+      );
+    }
+
     if (conversation.step === 'transaction_wallet') {
       const wallet = await this.wallets.findByName(userId, text);
-      return this.askTransactionDetails(
+      return this.askTransactionCategory(
         userId,
         chatId,
         conversation.action as 'income' | 'expense',
         wallet.name,
+      );
+    }
+
+    if (conversation.step === 'transaction_category') {
+      const category = await this.categories.findByName(
+        userId,
+        conversation.action as 'income' | 'expense',
+        text,
+      );
+      await this.conversations.save(
+        userId,
+        conversation.action,
+        'transaction_amount',
+        { ...conversation.data, categoryName: category.name },
+      );
+      return this.telegram.sendMessage(
+        chatId,
+        `Kategori terpilih: ${category.name}.\n\nMasukkan nominalnya saja.\nContoh: 150000`,
+        this.amountMenu(),
+      );
+    }
+
+    if (conversation.step === 'transaction_amount') {
+      const amount = this.amount(text);
+      if (!Number.isFinite(amount) || amount <= 0) {
+        return this.telegram.sendMessage(
+          chatId,
+          'Nominal belum valid. Kirim angka lebih dari nol, contoh: 150000',
+          this.amountMenu(),
+        );
+      }
+      await this.conversations.save(
+        userId,
+        conversation.action,
+        'transaction_description',
+        { ...conversation.data, amount: String(amount) },
+      );
+      return this.telegram.sendMessage(
+        chatId,
+        'Tambahkan keterangan bila perlu, atau tekan ⏭ Lewati keterangan.',
+        this.descriptionMenu(),
+      );
+    }
+
+    if (conversation.step === 'transaction_description') {
+      const description = text === '⏭ Lewati keterangan' ? '-' : text;
+      const transaction = await this.transactions.create(userId, {
+        type: conversation.action as 'income' | 'expense',
+        walletName: conversation.data.walletName,
+        categoryName: conversation.data.categoryName,
+        amount: Number(conversation.data.amount),
+        description,
+      });
+      await this.conversations.clear(userId);
+      return this.telegram.sendMessage(
+        chatId,
+        `✅ ${conversation.action === 'income' ? 'Pemasukan' : 'Pengeluaran'} Rp${Number(transaction.amount).toLocaleString('id-ID')} tersimpan di ${conversation.data.walletName}.`,
+        this.mainMenu(),
       );
     }
 
@@ -316,21 +617,44 @@ export class TelegramController {
       });
       return this.telegram.sendMessage(
         chatId,
-        'Berapa nominal transfernya?\nFormat: Nominal | Keterangan opsional\nContoh: 50000 | Isi saldo',
+        'Berapa nominal transfernya?\nContoh: 50000',
+        this.amountMenu(),
       );
     }
 
-    const [rawAmount, ...description] = this.parseTextFields(text);
-    if (!rawAmount)
+    if (conversation.step === 'transfer_details') {
+      const amount = this.amount(text);
+      if (!Number.isFinite(amount) || amount <= 0) {
+        return this.telegram.sendMessage(
+          chatId,
+          'Nominal belum valid. Kirim angka lebih dari nol, contoh: 50000',
+          this.amountMenu(),
+        );
+      }
+      await this.conversations.save(
+        userId,
+        'transfer',
+        'transfer_description',
+        { ...conversation.data, amount: String(amount) },
+      );
       return this.telegram.sendMessage(
         chatId,
-        'Kirim nominal transfer. Contoh: 50000 | Isi saldo',
+        'Tambahkan keterangan bila perlu, atau tekan ⏭ Lewati keterangan.',
+        this.descriptionMenu(),
       );
+    }
+
+    if (conversation.step !== 'transfer_description')
+      return this.telegram.sendMessage(
+        chatId,
+        'Input tidak dikenali. Kirim /cancel untuk membatalkan.',
+      );
+    const description = text === '⏭ Lewati keterangan' ? '-' : text;
     const transaction = await this.transactions.transfer(userId, {
       fromWalletName: conversation.data.fromWalletName,
       toWalletName: conversation.data.toWalletName,
-      amount: this.amount(rawAmount),
-      description: description.join(' | ').trim() || '-',
+      amount: Number(conversation.data.amount),
+      description,
     });
     await this.conversations.clear(userId);
     return this.telegram.sendMessage(
@@ -507,6 +831,7 @@ export class TelegramController {
     return this.telegram.sendMessage(
       chatId,
       `📊 *Laporan ${selected}*\nPemasukan: Rp${report.income.toLocaleString('id-ID')}\nPengeluaran: Rp${report.expense.toLocaleString('id-ID')}\nNeto: Rp${report.net.toLocaleString('id-ID')}`,
+      this.mainMenu(),
     );
   }
 
@@ -549,8 +874,9 @@ export class TelegramController {
       reply_markup: {
         keyboard: [
           ['➕ Catat Pemasukan', '➖ Catat Pengeluaran'],
-          ['↔️ Transfer', '💼 Wallet Saya'],
-          ['📊 Laporan Bulanan', '🧾 Riwayat'],
+          ['↔️ Transfer', '💼 Kelola Wallet'],
+          ['🏷️ Kelola Kategori', '📊 Laporan'],
+          ['🧾 Riwayat', '📎 Upload Struk'],
           ['❓ Bantuan'],
         ],
         resize_keyboard: true,
@@ -568,8 +894,101 @@ export class TelegramController {
     };
   }
 
+  private walletManagementMenu() {
+    return {
+      reply_markup: {
+        keyboard: [
+          ['💼 Wallet Saya', '➕ Tambah Rekening'],
+          ['✏️ Ubah Nama Rekening', '🗑 Hapus Rekening'],
+          ['❓ Bantuan'],
+        ],
+        resize_keyboard: true,
+      },
+    };
+  }
+
+  private categoryManagementMenu() {
+    return {
+      reply_markup: {
+        keyboard: [
+          ['➕ Kategori Pemasukan', '➖ Kategori Pengeluaran'],
+          ['❓ Bantuan'],
+        ],
+        resize_keyboard: true,
+      },
+    };
+  }
+
+  private reportMenu() {
+    return {
+      reply_markup: {
+        keyboard: [
+          ['📅 Hari ini', '📅 Minggu ini'],
+          ['📅 Bulan ini', '📅 Tahun ini'],
+          ['❓ Bantuan'],
+        ],
+        resize_keyboard: true,
+        one_time_keyboard: true,
+      },
+    };
+  }
+
+  private attachmentMenu(labels: string[]) {
+    return {
+      reply_markup: {
+        keyboard: [...labels.map((label) => [label]), ['/cancel']],
+        resize_keyboard: true,
+        one_time_keyboard: true,
+      },
+    };
+  }
+
+  private confirmDeleteMenu() {
+    return {
+      reply_markup: {
+        keyboard: [['✅ Ya, hapus', '❌ Tidak, batal'], ['/cancel']],
+        resize_keyboard: true,
+        one_time_keyboard: true,
+      },
+    };
+  }
+
+  private categoryMenu(categoryNames: string[]) {
+    return {
+      reply_markup: {
+        keyboard: [...categoryNames.map((name) => [name]), ['/cancel']],
+        resize_keyboard: true,
+        one_time_keyboard: true,
+      },
+    };
+  }
+
+  private amountMenu() {
+    return {
+      reply_markup: {
+        keyboard: [
+          ['10000', '25000', '50000'],
+          ['100000', '500000'],
+          ['/cancel'],
+        ],
+        resize_keyboard: true,
+        one_time_keyboard: true,
+      },
+    };
+  }
+
+  private descriptionMenu() {
+    return {
+      reply_markup: {
+        keyboard: [['⏭ Lewati keterangan'], ['/cancel']],
+        resize_keyboard: true,
+        one_time_keyboard: true,
+      },
+    };
+  }
+
   private welcome() {
-    return '👋 Selamat datang di Finance Assistant!\n\nPilih menu di bawah untuk mulai. Saya sudah menyiapkan wallet Cash dan kategori dasar untuk Anda.';
+    return '👋 Selamat datang di Raf Assistant!\n\nPilih menu di bawah untuk mulai. Saya sudah menyiapkan wallet Cash dan kategori dasar untuk Anda.';
   }
 
   private help() {

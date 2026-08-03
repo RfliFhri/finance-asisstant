@@ -22,14 +22,30 @@ enum ConversationAction {
   income
   expense
   transfer
+  wallet
+  category_income
+  category_expense
+  attachment
 }
 
 enum ConversationStep {
   transaction_wallet
+  transaction_category
+  transaction_amount
+  transaction_description
   transaction_details
   transfer_source_wallet
   transfer_destination_wallet
   transfer_details
+  transfer_description
+  wallet_name
+  wallet_select_rename
+  wallet_new_name
+  wallet_select_delete
+  wallet_delete_confirm
+  category_name
+  attachment_transaction
+  attachment_upload
 }
 
 model User {

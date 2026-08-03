@@ -52,8 +52,8 @@ Atur Root Directory project Vercel ke `backend`, lalu tambahkan semua environmen
 
 ## Perintah bot
 
-- Tekan `➕ Catat Pemasukan` atau `➖ Catat Pengeluaran`. Bot memakai wallet default user dan meminta `Kategori | Nominal | Keterangan opsional`.
-- Tekan `↔️ Transfer`. Bot menanyakan wallet asal, wallet tujuan, kemudian `Nominal | Keterangan opsional`.
+- Tekan `➕ Catat Pemasukan` atau `➖ Catat Pengeluaran`. Jika terdapat beberapa rekening, bot menampilkan tombol pilihan rekening, kategori, nominal, dan keterangan opsional secara bertahap.
+- Tekan `↔️ Transfer`. Bot menampilkan pilihan wallet asal dan tujuan, kemudian meminta nominal serta keterangan opsional.
 - Ketik `/cancel` kapan saja untuk membatalkan flow yang sedang berjalan.
 - `/start` — registrasi dan seed wallet/kategori default.
 - `/wallet`, `/wallet add Nama`, `/wallet rename Lama|Baru`, `/wallet delete Nama`.

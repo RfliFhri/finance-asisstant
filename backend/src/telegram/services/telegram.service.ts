@@ -38,6 +38,10 @@ export class TelegramService implements OnModuleInit {
     return this.bot.sendMessage(chatId, text, options as never);
   }
 
+  async sendTyping(chatId: number | string) {
+    return this.bot.sendChatAction(chatId, 'typing');
+  }
+
   async sendPhoto(chatId: number | string, photo: string, caption?: string) {
     return this.bot.sendPhoto(chatId, photo, {
       caption,
