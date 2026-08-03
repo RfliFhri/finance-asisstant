@@ -43,6 +43,7 @@
     "@types/express": "^5.0.0",
     "@types/jest": "^30.0.0",
     "@types/node": "^24.0.0",
+    "@types/node-telegram-bot-api": "^0.64.15",
     "@types/supertest": "^7.0.0",
     "eslint": "^9.39.5",
     "eslint-config-prettier": "^10.0.1",

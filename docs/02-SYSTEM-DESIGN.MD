@@ -236,38 +236,93 @@ Setiap module berdiri sendiri.
 # 8. Folder Structure
 
 ```
-src/
-
-├── common/
-│
-├── config/
-│
-├── database/
+backend/
 │
 ├── prisma/
+│   ├── migrations/
+│   └── schema.prisma
 │
-├── modules/
+├── src/
+│   │
+│   ├── app.module.ts
+│   ├── main.ts
+│   │
+│   ├── config/
+│   │   ├── configuration.ts
+│   │   └── env.validation.ts
+│   │
+│   ├── common/
+│   │   ├── constants/
+│   │   ├── decorators/
+│   │   ├── dto/
+│   │   ├── enums/
+│   │   ├── exceptions/
+│   │   ├── filters/
+│   │   ├── guards/
+│   │   ├── interceptors/
+│   │   ├── interfaces/
+│   │   ├── pipes/
+│   │   └── utils/
+│   │
+│   ├── prisma/
+│   │   ├── prisma.module.ts
+│   │   └── prisma.service.ts
+│   │
+│   ├── telegram/
+│   │   ├── controllers/
+│   │   ├── services/
+│   │   ├── dto/
+│   │   ├── interfaces/
+│   │   └── telegram.module.ts
 │   │
 │   ├── users/
+│   │   ├── controllers/
+│   │   ├── services/
 │   │   ├── dto/
-│   │   ├── entities/
-│   │   ├── interfaces/
-│   │   ├── users.controller.ts
-│   │   ├── users.service.ts
-│   │   ├── users.repository.ts
 │   │   └── users.module.ts
 │   │
-│   ├── wallets/
 │   ├── categories/
+│   │   ├── controllers/
+│   │   ├── services/
+│   │   ├── dto/
+│   │   └── categories.module.ts
+│   │
 │   ├── transactions/
+│   │   ├── controllers/
+│   │   ├── services/
+│   │   ├── dto/
+│   │   ├── parser/
+│   │   └── transactions.module.ts
+│   │
 │   ├── attachments/
-│   ├── reports/
-│   ├── telegram/
-│   └── settings/
+│   │   ├── controllers/
+│   │   ├── services/
+│   │   └── attachments.module.ts
+│   │
+│   ├── ocr/
+│   │   ├── services/
+│   │   └── ocr.module.ts
+│   │
+│   ├── ai/
+│   │   ├── prompts/
+│   │   ├── services/
+│   │   └── ai.module.ts
+│   │
+│   ├── dashboard/
+│   │   ├── controllers/
+│   │   ├── services/
+│   │   └── dashboard.module.ts
+│   │
+│   └── health/
+│       ├── health.controller.ts
+│       └── health.module.ts
 │
-├── app.module.ts
+├── test/
 │
-└── main.ts
+├── .env
+├── .env.example
+├── package.json
+└── tsconfig.json
 ```
 
 Seluruh module mengikuti struktur yang sama.

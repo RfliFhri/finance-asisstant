@@ -1,2 +1,6 @@
 
 /generated/prisma
+.env
+.env.local
+.env.*.local
+!.env.example

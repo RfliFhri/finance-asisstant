@@ -10,6 +10,7 @@ datasource db {
 enum TransactionType {
   income
   expense
+  transfer
 }
 
 enum CategoryType {
@@ -17,93 +18,101 @@ enum CategoryType {
   expense
 }
 
-enum TransactionSource {
-  manual
-  photo
-  transfer
+model User {
+  id               String        @id @default(uuid())
+  telegramId       BigInt        @unique
+  telegramUsername String?       @db.VarChar(100)
+  firstName        String?       @db.VarChar(100)
+  lastName         String?       @db.VarChar(100)
+  languageCode     String?       @db.VarChar(10)
+  isActive         Boolean       @default(true)
+  timezone         String        @default("Asia/Jakarta")
+  currency         String        @default("IDR") @db.Char(3)
+  wallets          Wallet[]
+  categories       Category[]
+  transactions     Transaction[]
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+
+  @@map("users")
 }
 
-model User {
-  id         String  @id @default(uuid())
-  telegramId BigInt  @unique
-  username   String?
-  fullName   String
-  timezone   String  @default("Asia/Jakarta")
-  currency   String  @default("IDR")
+model Wallet {
+  id                   String        @id @default(uuid())
+  userId               String
+  name                 String        @db.VarChar(100)
+  icon                 String?       @db.VarChar(50)
+  color                String?       @db.VarChar(20)
+  currency             String        @default("IDR") @db.Char(3)
+  isDefault            Boolean       @default(false)
+  isActive             Boolean       @default(true)
+  user                 User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  transactions         Transaction[] @relation("TransactionWallet")
+  incomingTransactions Transaction[] @relation("TransferDestinationWallet")
+  createdAt            DateTime      @default(now())
+  updatedAt            DateTime      @updatedAt
 
-  transactions Transaction[]
-  categories   Category[]
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  @@unique([userId, name])
+  @@index([userId])
+  @@map("wallets")
 }
 
 model Category {
-  id     String @id @default(uuid())
-  userId String
-
-  name String
-  type CategoryType
-
-  icon  String?
-  color String?
-
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
-
+  id           String        @id @default(uuid())
+  userId       String
+  type         CategoryType
+  name         String        @db.VarChar(100)
+  icon         String?       @db.VarChar(50)
+  color        String?       @db.VarChar(20)
+  isDefault    Boolean       @default(false)
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
   transactions Transaction[]
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
 
-  createdAt DateTime @default(now())
-
+  @@unique([userId, type, name])
   @@index([userId])
+  @@map("categories")
 }
 
 model Transaction {
-  id String @id @default(uuid())
-
-  userId     String
-  categoryId String?
-
-  type TransactionType
-
-  amount Decimal @db.Decimal(18, 2)
-
-  description String
-
-  transactionDate DateTime
-
-  source TransactionSource
-
-  aiConfidence Float?
-
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  category Category? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
-
-  attachments Attachment[]
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id               String          @id @default(uuid())
+  userId           String
+  walletId         String
+  transferWalletId String?
+  categoryId       String?
+  type             TransactionType
+  amount           Decimal         @db.Decimal(18, 2)
+  description      String          @db.Text
+  transactionDate  DateTime
+  user             User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  wallet           Wallet          @relation("TransactionWallet", fields: [walletId], references: [id], onDelete: Restrict)
+  transferWallet   Wallet?         @relation("TransferDestinationWallet", fields: [transferWalletId], references: [id], onDelete: Restrict)
+  category         Category?       @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  attachments      Attachment[]
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
 
   @@index([userId])
+  @@index([walletId])
+  @@index([transferWalletId])
   @@index([categoryId])
   @@index([transactionDate])
+  @@index([type])
+  @@map("transactions")
 }
 
 model Attachment {
-  id String @id @default(uuid())
-
-  transactionId String
-
-  telegramFileId       String
-  telegramFileUniqueId String
-
-  mimeType String?
-
-  fileSize Int?
-
-  transaction Transaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
-
-  createdAt DateTime @default(now())
+  id                   String      @id @default(uuid())
+  transactionId        String
+  telegramFileId       String      @db.Text
+  telegramFileUniqueId String      @db.Text
+  fileName             String?     @db.VarChar(255)
+  mimeType             String?     @db.VarChar(100)
+  fileSize             BigInt?
+  transaction          Transaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  createdAt            DateTime    @default(now())
 
   @@index([transactionId])
+  @@map("attachments")
 }
