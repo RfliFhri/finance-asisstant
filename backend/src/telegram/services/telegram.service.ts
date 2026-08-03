@@ -30,8 +30,12 @@ export class TelegramService implements OnModuleInit {
     return this.bot;
   }
 
-  async sendMessage(chatId: number | string, text: string) {
-    return this.bot.sendMessage(chatId, text);
+  async sendMessage(
+    chatId: number | string,
+    text: string,
+    options: Record<string, unknown> = {},
+  ) {
+    return this.bot.sendMessage(chatId, text, options as never);
   }
 
   async sendPhoto(chatId: number | string, photo: string, caption?: string) {

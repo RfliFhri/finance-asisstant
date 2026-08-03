@@ -93,9 +93,13 @@ export class TelegramController {
       case '/start':
         await this.wallets.ensureDefault(userId);
         await this.categories.ensureDefaults(userId);
-        return this.telegram.sendMessage(chatId, this.help());
+        return this.telegram.sendMessage(
+          chatId,
+          this.welcome(),
+          this.mainMenu(),
+        );
       case '/help':
-        return this.telegram.sendMessage(chatId, this.help());
+        return this.telegram.sendMessage(chatId, this.help(), this.mainMenu());
       case '/wallet':
         return this.walletCommand(userId, chatId, args);
       case '/category':
@@ -122,6 +126,27 @@ export class TelegramController {
         return this.historyCommand(userId, chatId);
       case '/transaction':
         return this.transactionManagementCommand(userId, chatId, args);
+      case '💼':
+      case '💼 wallet saya':
+        return this.walletCommand(userId, chatId, []);
+      case '📊':
+      case '📊 laporan bulanan':
+        return this.reportCommand(userId, chatId);
+      case '🧾':
+      case '🧾 riwayat':
+        return this.historyCommand(userId, chatId);
+      case '➕':
+      case '➕ catat pemasukan':
+        return this.transactionHint(chatId, 'income');
+      case '➖':
+      case '➖ catat pengeluaran':
+        return this.transactionHint(chatId, 'expense');
+      case '↔️':
+      case '↔️ transfer':
+        return this.transferHint(chatId);
+      case '❓':
+      case '❓ bantuan':
+        return this.telegram.sendMessage(chatId, this.help(), this.mainMenu());
       default:
         return this.telegram.sendMessage(
           chatId,
@@ -231,11 +256,12 @@ export class TelegramController {
     type: 'income' | 'expense',
     args: string[],
   ) {
-    const [walletName, categoryName, rawAmount, ...description] = args;
+    const [walletName, categoryName, rawAmount, ...description] =
+      this.parseFields(args);
     if (!walletName || !categoryName || !rawAmount)
       return this.telegram.sendMessage(
         chatId,
-        `Format: /${type} Wallet Kategori Nominal Deskripsi`,
+        `Format mudah:\n/${type} Wallet | Kategori | Nominal | Keterangan`,
       );
     const transaction = await this.transactions.create(userId, {
       type,
@@ -255,11 +281,12 @@ export class TelegramController {
     chatId: number,
     args: string[],
   ) {
-    const [fromWalletName, toWalletName, rawAmount, ...description] = args;
+    const [fromWalletName, toWalletName, rawAmount, ...description] =
+      this.parseFields(args);
     if (!fromWalletName || !toWalletName || !rawAmount)
       return this.telegram.sendMessage(
         chatId,
-        'Format: /transfer WalletAsal WalletTujuan Nominal Deskripsi',
+        'Format mudah:\n/transfer Wallet Asal | Wallet Tujuan | Nominal | Keterangan',
       );
     const transaction = await this.transactions.transfer(userId, {
       fromWalletName,
@@ -320,7 +347,48 @@ export class TelegramController {
         .replace(',', '.'),
     );
   }
+
+  private parseFields(args: string[]) {
+    const input = args.join(' ').trim();
+    return input.includes('|')
+      ? input.split('|').map((value) => value.trim())
+      : args;
+  }
+
+  private transactionHint(chatId: number, type: 'income' | 'expense') {
+    const label = type === 'income' ? 'pemasukan' : 'pengeluaran';
+    return this.telegram.sendMessage(
+      chatId,
+      `Kirim ${label} dengan format ini:\n/${type} Cash | ${type === 'income' ? 'Gaji' : 'Makan'} | 25000 | Keterangan\n\nTanda | membuat nama wallet, kategori, dan keterangan boleh mengandung spasi.`,
+    );
+  }
+
+  private transferHint(chatId: number) {
+    return this.telegram.sendMessage(
+      chatId,
+      'Kirim transfer dengan format ini:\n/transfer Cash | BCA | 50000 | Isi saldo',
+    );
+  }
+
+  private mainMenu() {
+    return {
+      reply_markup: {
+        keyboard: [
+          ['➕ Catat Pemasukan', '➖ Catat Pengeluaran'],
+          ['↔️ Transfer', '💼 Wallet Saya'],
+          ['📊 Laporan Bulanan', '🧾 Riwayat'],
+          ['❓ Bantuan'],
+        ],
+        resize_keyboard: true,
+      },
+    };
+  }
+
+  private welcome() {
+    return '👋 Selamat datang di Finance Assistant!\n\nPilih menu di bawah untuk mulai. Saya sudah menyiapkan wallet Cash dan kategori dasar untuk Anda.';
+  }
+
   private help() {
-    return '👋 *Finance Assistant*\n\n/wallet add Nama\n/wallet rename Nama Lama|Nama Baru\n/wallet delete Nama\n/wallet\n/category income Nama\n/category expense Nama\n/category income delete Nama\n/income Wallet Kategori Nominal Deskripsi\n/expense Wallet Kategori Nominal Deskripsi\n/transfer Asal Tujuan Nominal Deskripsi\n/transaction edit ID Deskripsi\n/transaction delete ID\n/report daily|weekly|monthly|yearly\n/history\nKirim foto/dokumen + caption: /attach ID_TRANSAKSI';
+    return 'Panduan singkat\n\n• Pemasukan: /income Cash | Gaji | 5000000 | Gaji bulanan\n• Pengeluaran: /expense Cash | Makan | 25000 | Makan siang\n• Transfer: /transfer Cash | BCA | 100000 | Isi rekening\n\nPerintah lain\n/wallet add Nama\n/wallet rename Nama Lama|Nama Baru\n/wallet delete Nama\n/category income Nama\n/category expense Nama\n/report daily|weekly|monthly|yearly\n/history\n\nLampiran: kirim foto/dokumen dengan caption /attach ID_TRANSAKSI';
   }
 }
