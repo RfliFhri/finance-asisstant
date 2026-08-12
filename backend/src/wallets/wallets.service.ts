@@ -3,7 +3,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { TransactionType } from '@prisma/client';
+import { Prisma, TransactionType } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 
 export interface CreateWalletInput {
@@ -33,8 +33,11 @@ export class WalletsService {
           isDefault: count === 0,
         },
       });
-    } catch (error: any) {
-      if (error.code === 'P2002')
+    } catch (error: unknown) {
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === 'P2002'
+      )
         throw new BadRequestException('Nama wallet sudah digunakan.');
       throw error;
     }
@@ -110,8 +113,11 @@ export class WalletsService {
         where: { id: wallet.id },
         data: { name: nextName.trim() },
       });
-    } catch (error: any) {
-      if (error.code === 'P2002') {
+    } catch (error: unknown) {
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === 'P2002'
+      ) {
         throw new BadRequestException('Nama wallet sudah digunakan.');
       }
       throw error;
@@ -122,8 +128,11 @@ export class WalletsService {
     const wallet = await this.findByName(userId, name);
     try {
       await this.prisma.wallet.delete({ where: { id: wallet.id } });
-    } catch (error: any) {
-      if (error.code === 'P2003') {
+    } catch (error: unknown) {
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === 'P2003'
+      ) {
         throw new BadRequestException(
           'Wallet yang memiliki transaksi tidak dapat dihapus.',
         );

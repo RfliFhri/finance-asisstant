@@ -1,14 +1,17 @@
 import { BadRequestException } from '@nestjs/common';
 import { TransactionsService } from './transactions.service';
+import { CategoriesService } from '../categories/categories.service';
+import { PrismaService } from '../prisma/prisma.service';
+import { WalletsService } from '../wallets/wallets.service';
 
 describe('TransactionsService', () => {
   const create = jest.fn();
   const wallets = { findByName: jest.fn() };
   const categories = { findByName: jest.fn() };
   const service = new TransactionsService(
-    { transaction: { create } } as any,
-    wallets as any,
-    categories as any,
+    { transaction: { create } } as unknown as PrismaService,
+    wallets as unknown as WalletsService,
+    categories as unknown as CategoriesService,
   );
 
   beforeEach(() => jest.clearAllMocks());

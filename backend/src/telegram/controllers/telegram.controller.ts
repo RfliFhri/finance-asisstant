@@ -21,6 +21,8 @@ import {
   ConversationsService,
 } from '../../conversations/conversations.service';
 import { ReceiptOcrService } from '../../ocr/receipt-ocr.service';
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+import TelegramBot = require('node-telegram-bot-api');
 
 @Controller('telegram')
 export class TelegramController {
@@ -42,7 +44,7 @@ export class TelegramController {
   @Post('webhook')
   @HttpCode(200)
   async webhook(
-    @Body() update: any,
+    @Body() update: TelegramBot.Update,
     @Headers('x-telegram-bot-api-secret-token') secret?: string,
   ) {
     const expectedSecret = this.config.get<string>('telegram.webhookSecret');
@@ -65,17 +67,21 @@ export class TelegramController {
       } else {
         await this.handleAttachment(user.id, message.chat.id, message);
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       this.logger.error(error);
       await this.telegram.sendMessage(
         message.chat.id,
-        `⚠️ ${error?.message ?? 'Terjadi kesalahan.'}`,
+        `⚠️ ${this.errorMessage(error)}`,
       );
     }
     return { ok: true };
   }
 
-  private async handleAttachment(userId: string, chatId: number, message: any) {
+  private async handleAttachment(
+    userId: string,
+    chatId: number,
+    message: TelegramBot.Message,
+  ) {
     const conversation = await this.conversations.get(userId);
     const file = message.document ?? message.photo?.[message.photo.length - 1];
     if (conversation?.step === 'receipt_upload') {
@@ -963,6 +969,10 @@ export class TelegramController {
     );
   }
 
+  private errorMessage(error: unknown) {
+    return error instanceof Error ? error.message : 'Terjadi kesalahan.';
+  }
+
   private parseFields(args: string[]) {
     return this.parseTextFields(args.join(' '));
   }
@@ -985,6 +995,8 @@ export class TelegramController {
           ['❓ Bantuan'],
         ],
         resize_keyboard: true,
+        is_persistent: true,
+        input_field_placeholder: 'Pilih menu atau ketik perintah',
       },
     };
   }

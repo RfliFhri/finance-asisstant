@@ -7,8 +7,8 @@ import {
 } from 'class-validator';
 
 export class EnvironmentVariables {
+  @IsOptional()
   @IsString()
-  @IsNotEmpty()
   APP_NAME: string;
 
   @IsOptional()

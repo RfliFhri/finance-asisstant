@@ -3,7 +3,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { CategoryType } from '@prisma/client';
+import { CategoryType, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 
 @Injectable()
@@ -15,8 +15,11 @@ export class CategoriesService {
       return await this.prisma.category.create({
         data: { userId, type, name: name.trim() },
       });
-    } catch (error: any) {
-      if (error.code === 'P2002')
+    } catch (error: unknown) {
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === 'P2002'
+      )
         throw new BadRequestException('Kategori tersebut sudah ada.');
       throw error;
     }
@@ -73,8 +76,11 @@ export class CategoriesService {
     }
     try {
       await this.prisma.category.delete({ where: { id: category.id } });
-    } catch (error: any) {
-      if (error.code === 'P2003') {
+    } catch (error: unknown) {
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === 'P2003'
+      ) {
         throw new BadRequestException(
           'Kategori yang memiliki transaksi tidak dapat dihapus.',
         );

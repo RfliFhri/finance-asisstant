@@ -21,9 +21,16 @@ export class TelegramService implements OnModuleInit {
       polling: false,
     });
 
-    const me = await this.bot.getMe();
-
-    this.logger.log(`Connected as @${me.username}`);
+    // Jangan membuat seluruh serverless function gagal hanya karena API Telegram
+    // sedang tidak dapat diakses ketika cold start.
+    void this.bot
+      .getMe()
+      .then((me) => this.logger.log(`Connected as @${me.username}`))
+      .catch((error: unknown) =>
+        this.logger.warn(
+          `Telegram belum dapat dihubungi saat startup: ${error instanceof Error ? error.message : String(error)}`,
+        ),
+      );
   }
 
   getBot(): TelegramBot {
