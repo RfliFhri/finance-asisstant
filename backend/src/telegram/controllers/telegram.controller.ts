@@ -202,10 +202,17 @@ export class TelegramController {
       normalizedText === '/menu' ||
       /\b(batal|cancel|kembali)\b/u.test(normalizedText)
     ) {
-      await this.conversations.clear(userId);
+      try {
+        await this.conversations.clear(userId);
+      } catch (error: unknown) {
+        // Menu pemulihan harus tetap tampil walau database sedang bermasalah.
+        this.logger.warn(
+          `State percakapan tidak dapat dihapus: ${this.errorMessage(error)}`,
+        );
+      }
       return this.telegram.sendMessage(
         chatId,
-        '✅ Semua proses aktif dibatalkan. Pilih menu untuk mulai lagi.',
+        '✅ Proses dihentikan. Menu utama sudah dibuka kembali.',
         this.mainMenu(),
       );
     }
