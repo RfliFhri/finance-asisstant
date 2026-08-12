@@ -50,6 +50,8 @@ curl "https://api.telegram.org/bot<TELEGRAM_BOT_TOKEN>/setWebhook" \
 
 Atur Root Directory project Vercel ke `backend`, Framework Preset ke `Other`, Build Command ke `npm run build`, dan kosongkan Output Directory. Tambahkan environment variable dari `.env` pada Vercel Project Settings. Khusus `DATABASE_URL`, gunakan URL **Transaction Pooler** Supabase (port `6543`), bukan Session Pooler. Setelah deployment, gunakan domain Vercel pada URL webhook di atas. Entrypoint serverless tersedia di `api/index.ts` dan semua route, termasuk `/health` serta `/telegram/webhook`, diarahkan ke sana.
 
+`vercel.json` memasukkan file WebAssembly Tesseract ke dalam function. Jangan menghapus konfigurasi `includeFiles`, karena tanpa file tersebut OCR struk akan gagal saat runtime.
+
 ## Perintah bot
 
 - Tekan `➕ Catat Pemasukan` atau `➖ Catat Pengeluaran`. Jika terdapat beberapa rekening, bot menampilkan tombol pilihan rekening, kategori, nominal, dan keterangan opsional secara bertahap.

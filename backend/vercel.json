@@ -2,7 +2,10 @@
   "version": 2,
   "functions": {
     "api/index.ts": {
-      "maxDuration": 30
+      "maxDuration": 60,
+      "includeFiles": [
+        "node_modules/tesseract.js-core/*.wasm"
+      ]
     }
   },
   "rewrites": [
