@@ -41,6 +41,52 @@ export class ReceiptOcrService {
     return values.length ? Math.max(...values) : null;
   }
 
+  /** Selects the closest existing category; OCR is still only used to read the receipt. */
+  detectCategory(
+    text: string,
+    categoryNames: string[],
+    type: 'income' | 'expense',
+  ): string | null {
+    if (!categoryNames.length) return null;
+    const normalizedText = text.toLocaleLowerCase('id-ID');
+    const fallback = categoryNames.find(
+      (name) => name.toLocaleLowerCase('id-ID') === 'lainnya',
+    );
+    if (type === 'income') return fallback ?? categoryNames[0];
+
+    const keywordsByCategory: Record<string, string[]> = {
+      makan: [
+        'resto',
+        'restaurant',
+        'rumah makan',
+        'cafe',
+        'kopi',
+        'coffee',
+        'bakery',
+        'food',
+        'grabfood',
+        'gofood',
+      ],
+      transportasi: [
+        'grab',
+        'gojek',
+        'gocar',
+        'taksi',
+        'taxi',
+        'parkir',
+        'pertamina',
+        'shell',
+        'spbu',
+      ],
+    };
+    const matched = categoryNames.find((name) => {
+      const normalizedName = name.toLocaleLowerCase('id-ID');
+      const keywords = keywordsByCategory[normalizedName] ?? [normalizedName];
+      return keywords.some((keyword) => normalizedText.includes(keyword));
+    });
+    return matched ?? fallback ?? categoryNames[0];
+  }
+
   private parseAmount(value: string): number | null {
     const digits = value.replace(/[^0-9]/g, '');
     const amount = Number(digits);

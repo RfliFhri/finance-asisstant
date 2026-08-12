@@ -98,11 +98,26 @@ export class TelegramController {
       }
       await this.telegram.sendMessage(chatId, '⏳ Membaca total pada struk...');
       const fileLink = await this.telegram.getFileLink(file.file_id);
-      const { amount } = await this.receiptOcr.extractTotal(fileLink);
+      const { amount, text } = await this.receiptOcr.extractTotal(fileLink);
+      const categories = await this.categories.list(
+        userId,
+        conversation.action as 'income' | 'expense',
+      );
+      const categoryName = this.receiptOcr.detectCategory(
+        text,
+        categories.map((category) => category.name),
+        conversation.action as 'income' | 'expense',
+      );
+      if (!categoryName) {
+        return this.telegram.sendMessage(
+          chatId,
+          'Belum ada kategori untuk tipe transaksi ini. Buat kategori terlebih dahulu.',
+        );
+      }
       const transaction = await this.transactions.create(userId, {
         type: conversation.action as 'income' | 'expense',
         walletName: conversation.data.walletName,
-        categoryName: conversation.data.categoryName,
+        categoryName,
         amount,
         description: 'Dicatat otomatis dari struk',
       });
@@ -116,7 +131,7 @@ export class TelegramController {
       await this.conversations.clear(userId);
       return this.telegram.sendMessage(
         chatId,
-        `✅ ${conversation.action === 'income' ? 'Pemasukan' : 'Pengeluaran'} Rp${Number(transaction.amount).toLocaleString('id-ID')} berhasil dicatat dari struk di ${conversation.data.walletName}.`,
+        `✅ ${conversation.action === 'income' ? 'Pemasukan' : 'Pengeluaran'} Rp${Number(transaction.amount).toLocaleString('id-ID')} berhasil dicatat dari struk.\nKategori otomatis: ${categoryName}\nWallet: ${conversation.data.walletName}.`,
         this.mainMenu(),
       );
     }
@@ -168,6 +183,14 @@ export class TelegramController {
       return this.telegram.sendMessage(
         chatId,
         'Input dibatalkan. Pilih menu untuk mulai lagi.',
+        this.mainMenu(),
+      );
+    }
+    if (text === '⬅️ Kembali') {
+      await this.conversations.clear(userId);
+      return this.telegram.sendMessage(
+        chatId,
+        'Kembali ke menu utama.',
         this.mainMenu(),
       );
     }
@@ -394,13 +417,7 @@ export class TelegramController {
       );
     }
     if (wallets.length === 1) {
-      return this.askTransactionCategory(
-        userId,
-        chatId,
-        action,
-        wallets[0].name,
-        true,
-      );
+      return this.startReceiptUpload(userId, chatId, action, wallets[0].name);
     }
     await this.conversations.save(userId, action, 'transaction_wallet', {
       receipt: 'true',
@@ -409,6 +426,22 @@ export class TelegramController {
       chatId,
       'Pilih rekening/wallet untuk transaksi dari struk:',
       this.walletMenu(wallets.map((wallet) => wallet.name)),
+    );
+  }
+
+  private async startReceiptUpload(
+    userId: string,
+    chatId: number,
+    action: 'income' | 'expense',
+    walletName: string,
+  ) {
+    await this.conversations.save(userId, action, 'receipt_upload', {
+      walletName,
+    });
+    return this.telegram.sendMessage(
+      chatId,
+      `Rekening terpilih: ${walletName}.\n\nSekarang kirim foto struknya. Saya akan membaca total dan memilih kategori otomatis.`,
+      this.backMenu(),
     );
   }
 
@@ -445,7 +478,6 @@ export class TelegramController {
     chatId: number,
     action: 'income' | 'expense',
     walletName: string,
-    receipt = false,
   ) {
     const categories = await this.categories.list(userId, action);
     if (!categories.length) {
@@ -456,7 +488,6 @@ export class TelegramController {
     }
     await this.conversations.save(userId, action, 'transaction_category', {
       walletName,
-      ...(receipt ? { receipt: 'true' } : {}),
     });
     return this.telegram.sendMessage(
       chatId,
@@ -593,12 +624,19 @@ export class TelegramController {
 
     if (conversation.step === 'transaction_wallet') {
       const wallet = await this.wallets.findByName(userId, text);
+      if (conversation.data.receipt === 'true') {
+        return this.startReceiptUpload(
+          userId,
+          chatId,
+          conversation.action as 'income' | 'expense',
+          wallet.name,
+        );
+      }
       return this.askTransactionCategory(
         userId,
         chatId,
         conversation.action as 'income' | 'expense',
         wallet.name,
-        conversation.data.receipt === 'true',
       );
     }
 
@@ -608,20 +646,15 @@ export class TelegramController {
         conversation.action as 'income' | 'expense',
         text,
       );
-      const nextStep =
-        conversation.data.receipt === 'true'
-          ? 'receipt_upload'
-          : 'transaction_amount';
-      await this.conversations.save(userId, conversation.action, nextStep, {
-        ...conversation.data,
-        categoryName: category.name,
-      });
-      if (nextStep === 'receipt_upload') {
-        return this.telegram.sendMessage(
-          chatId,
-          `Kategori terpilih: ${category.name}.\n\nSekarang kirim foto struknya. Total akan dibaca dan transaksi otomatis dicatat.`,
-        );
-      }
+      await this.conversations.save(
+        userId,
+        conversation.action,
+        'transaction_amount',
+        {
+          ...conversation.data,
+          categoryName: category.name,
+        },
+      );
       return this.telegram.sendMessage(
         chatId,
         `Kategori terpilih: ${category.name}.\n\nMasukkan nominalnya saja.\nContoh: 150000`,
@@ -1004,7 +1037,7 @@ export class TelegramController {
   private walletMenu(walletNames: string[]) {
     return {
       reply_markup: {
-        keyboard: [...walletNames.map((name) => [name]), ['/cancel']],
+        keyboard: [...walletNames.map((name) => [name]), ['⬅️ Kembali']],
         resize_keyboard: true,
         one_time_keyboard: true,
       },
@@ -1017,7 +1050,7 @@ export class TelegramController {
         keyboard: [
           ['💼 Wallet Saya', '➕ Tambah Rekening'],
           ['✏️ Ubah Nama Rekening', '🗑 Hapus Rekening'],
-          ['❓ Bantuan'],
+          ['❓ Bantuan', '⬅️ Kembali'],
         ],
         resize_keyboard: true,
       },
@@ -1029,7 +1062,7 @@ export class TelegramController {
       reply_markup: {
         keyboard: [
           ['➕ Kategori Pemasukan', '➖ Kategori Pengeluaran'],
-          ['❓ Bantuan'],
+          ['❓ Bantuan', '⬅️ Kembali'],
         ],
         resize_keyboard: true,
       },
@@ -1042,7 +1075,7 @@ export class TelegramController {
         keyboard: [
           ['📅 Hari ini', '📅 Minggu ini'],
           ['📅 Bulan ini', '📅 Tahun ini'],
-          ['❓ Bantuan'],
+          ['❓ Bantuan', '⬅️ Kembali'],
         ],
         resize_keyboard: true,
         one_time_keyboard: true,
@@ -1053,7 +1086,7 @@ export class TelegramController {
   private attachmentMenu(labels: string[]) {
     return {
       reply_markup: {
-        keyboard: [...labels.map((label) => [label]), ['/cancel']],
+        keyboard: [...labels.map((label) => [label]), ['⬅️ Kembali']],
         resize_keyboard: true,
         one_time_keyboard: true,
       },
@@ -1063,7 +1096,7 @@ export class TelegramController {
   private receiptTypeMenu() {
     return {
       reply_markup: {
-        keyboard: [['➕ Pemasukan', '➖ Pengeluaran'], ['/cancel']],
+        keyboard: [['➕ Pemasukan', '➖ Pengeluaran'], ['⬅️ Kembali']],
         resize_keyboard: true,
         one_time_keyboard: true,
       },
@@ -1073,7 +1106,7 @@ export class TelegramController {
   private confirmDeleteMenu() {
     return {
       reply_markup: {
-        keyboard: [['✅ Ya, hapus', '❌ Tidak, batal'], ['/cancel']],
+        keyboard: [['✅ Ya, hapus', '❌ Tidak, batal'], ['⬅️ Kembali']],
         resize_keyboard: true,
         one_time_keyboard: true,
       },
@@ -1083,7 +1116,7 @@ export class TelegramController {
   private categoryMenu(categoryNames: string[]) {
     return {
       reply_markup: {
-        keyboard: [...categoryNames.map((name) => [name]), ['/cancel']],
+        keyboard: [...categoryNames.map((name) => [name]), ['⬅️ Kembali']],
         resize_keyboard: true,
         one_time_keyboard: true,
       },
@@ -1096,7 +1129,7 @@ export class TelegramController {
         keyboard: [
           ['10000', '25000', '50000'],
           ['100000', '500000'],
-          ['/cancel'],
+          ['⬅️ Kembali'],
         ],
         resize_keyboard: true,
         one_time_keyboard: true,
@@ -1107,7 +1140,17 @@ export class TelegramController {
   private descriptionMenu() {
     return {
       reply_markup: {
-        keyboard: [['⏭ Lewati keterangan'], ['/cancel']],
+        keyboard: [['⏭ Lewati keterangan'], ['⬅️ Kembali']],
+        resize_keyboard: true,
+        one_time_keyboard: true,
+      },
+    };
+  }
+
+  private backMenu() {
+    return {
+      reply_markup: {
+        keyboard: [['⬅️ Kembali']],
         resize_keyboard: true,
         one_time_keyboard: true,
       },
@@ -1119,6 +1162,6 @@ export class TelegramController {
   }
 
   private help() {
-    return 'Panduan singkat\n\n• Pemasukan: /income Cash | Gaji | 5000000 | Gaji bulanan\n• Pengeluaran: /expense Cash | Makan | 25000 | Makan siang\n• Transfer: /transfer Cash | BCA | 100000 | Isi rekening\n\nPerintah lain\n/wallet add Nama\n/wallet rename Nama Lama|Nama Baru\n/wallet delete Nama\n/category income Nama\n/category expense Nama\n/report daily|weekly|monthly|yearly\n/history\n\nLampiran: kirim foto/dokumen dengan caption /attach ID_TRANSAKSI';
+    return '❓ *Bantuan Menu*\n\n➕ *Catat Pemasukan*\nMencatat uang yang masuk, misalnya gaji atau hasil usaha.\n\n➖ *Catat Pengeluaran*\nMencatat uang yang keluar, misalnya makan, belanja, atau transportasi.\n\n↔️ *Transfer*\nMemindahkan saldo dari satu rekening ke rekening lain.\n\n💼 *Kelola Wallet*\nMelihat, menambah, mengganti nama, atau menghapus rekening/wallet.\n\n🏷️ *Kelola Kategori*\nMenambah kategori untuk pemasukan dan pengeluaran agar catatan lebih rapi.\n\n📊 *Laporan*\nMelihat ringkasan pemasukan, pengeluaran, dan saldo bersih berdasarkan periode.\n\n🧾 *Riwayat*\nMelihat daftar transaksi terakhir.\n\n📎 *Upload Struk*\nMengirim foto struk, lalu totalnya akan dibaca untuk dicatat sebagai pemasukan atau pengeluaran.\n\n⬅️ *Kembali*\nMembatalkan langkah yang sedang berjalan dan kembali ke menu utama.';
   }
 }

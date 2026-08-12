@@ -31,6 +31,10 @@ export class EnvironmentVariables {
 
   @IsOptional()
   TELEGRAM_WEBHOOK_SECRET: string;
+
+  @IsOptional()
+  @IsString()
+  TELEGRAM_WEBHOOK_URL: string;
 }
 
 export function validateEnvironment(config: Record<string, unknown>) {

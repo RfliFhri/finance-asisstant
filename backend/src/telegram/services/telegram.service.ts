@@ -20,6 +20,10 @@ export class TelegramService implements OnModuleInit {
     this.bot = new TelegramBot(token, {
       polling: false,
     });
+    const webhookUrl = this.configService.get<string>('telegram.webhookUrl');
+    const webhookSecret = this.configService.get<string>(
+      'telegram.webhookSecret',
+    );
 
     // Jangan membuat seluruh serverless function gagal hanya karena API Telegram
     // sedang tidak dapat diakses ketika cold start.
@@ -31,6 +35,20 @@ export class TelegramService implements OnModuleInit {
           `Telegram belum dapat dihubungi saat startup: ${error instanceof Error ? error.message : String(error)}`,
         ),
       );
+
+    if (webhookUrl) {
+      try {
+        await this.bot.setWebHook(webhookUrl, {
+          allowed_updates: ['message'],
+          ...(webhookSecret ? { secret_token: webhookSecret } : {}),
+        });
+        this.logger.log(`Webhook Telegram aktif: ${webhookUrl}`);
+      } catch (error: unknown) {
+        this.logger.error(
+          `Webhook Telegram gagal didaftarkan: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    }
   }
 
   getBot(): TelegramBot {
@@ -73,8 +91,11 @@ export class TelegramService implements OnModuleInit {
     return this.bot.getFileLink(fileId);
   }
 
-  async setWebhook(url: string) {
-    return this.bot.setWebHook(url);
+  async setWebhook(url: string, secretToken?: string) {
+    return this.bot.setWebHook(url, {
+      ...(secretToken ? { secret_token: secretToken } : {}),
+      allowed_updates: ['message'],
+    });
   }
 
   async deleteWebhook() {

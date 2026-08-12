@@ -38,7 +38,7 @@ Supabase direct connection memerlukan IPv6. Bila jaringan hanya IPv4, gunakan **
 
 Backend menerima update pada `POST /telegram/webhook`. Saat `TELEGRAM_WEBHOOK_SECRET` terisi, request harus mempunyai header `X-Telegram-Bot-Api-Secret-Token` yang sama.
 
-Set webhook sesudah backend memiliki URL HTTPS publik:
+Isi `TELEGRAM_WEBHOOK_URL` dengan `https://<DOMAIN>/telegram/webhook`. Backend akan mendaftarkan webhook ini otomatis saat boot. Bila perlu mendaftarkan manual, gunakan:
 
 ```bash
 curl "https://api.telegram.org/bot<TELEGRAM_BOT_TOKEN>/setWebhook" \
