@@ -32,7 +32,7 @@ Migration awal berada di `prisma/migrations`. Untuk database baru yang dapat mem
 npx prisma migrate deploy
 ```
 
-Supabase direct connection memerlukan IPv6. Bila jaringan hanya IPv4, gunakan Session Pooler untuk runtime dan jalankan migration dari jaringan yang mendukung IPv6 atau gunakan IPv4 add-on Supabase.
+Supabase direct connection memerlukan IPv6. Bila jaringan hanya IPv4, gunakan **Session Pooler** (port `5432`) untuk menjalankan migrasi dari mesin lokal. Untuk runtime Vercel gunakan **Transaction Pooler** (port `6543`) dan tambahkan `?pgbouncer=true` pada URL.
 
 ## Webhook Telegram
 
@@ -48,7 +48,7 @@ curl "https://api.telegram.org/bot<TELEGRAM_BOT_TOKEN>/setWebhook" \
 
 ## Deploy ke Vercel
 
-Atur Root Directory project Vercel ke `backend`, lalu tambahkan semua environment variable dari `.env` pada Vercel Project Settings. Setelah deployment, gunakan domain Vercel pada URL webhook di atas. Entrypoint serverless tersedia di `api/index.ts` dan semua route, termasuk `/health` serta `/telegram/webhook`, diarahkan ke sana.
+Atur Root Directory project Vercel ke `backend`, Framework Preset ke `Other`, Build Command ke `npm run build`, dan kosongkan Output Directory. Tambahkan environment variable dari `.env` pada Vercel Project Settings. Khusus `DATABASE_URL`, gunakan URL **Transaction Pooler** Supabase (port `6543`), bukan Session Pooler. Setelah deployment, gunakan domain Vercel pada URL webhook di atas. Entrypoint serverless tersedia di `api/index.ts` dan semua route, termasuk `/health` serta `/telegram/webhook`, diarahkan ke sana.
 
 ## Perintah bot
 
