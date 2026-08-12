@@ -3,9 +3,7 @@
   "functions": {
     "api/index.ts": {
       "maxDuration": 60,
-      "includeFiles": [
-        "node_modules/tesseract.js-core/*.wasm"
-      ]
+      "includeFiles": "node_modules/tesseract.js-core/*.wasm"
     }
   },
   "rewrites": [
