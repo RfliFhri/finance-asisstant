@@ -7,7 +7,19 @@ export class ReceiptOcrService {
   async extractTotal(
     imageUrl: string,
   ): Promise<{ amount: number; text: string }> {
-    const { data } = await recognize(imageUrl, 'ind+eng');
+    const recognition = recognize(imageUrl, 'ind+eng');
+    const timeout = new Promise<never>((_, reject) => {
+      setTimeout(
+        () =>
+          reject(
+            new BadRequestException(
+              'Pembacaan struk terlalu lama. Proses dibatalkan, silakan kirim foto yang lebih jelas.',
+            ),
+          ),
+        25_000,
+      );
+    });
+    const { data } = await Promise.race([recognition, timeout]);
     const text = data.text;
     const amount = this.findTotal(text);
     if (!amount) {

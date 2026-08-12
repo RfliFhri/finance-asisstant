@@ -96,49 +96,62 @@ export class TelegramController {
           'Saat ini pembacaan otomatis mendukung foto struk (JPG/PNG), bukan PDF.',
         );
       }
-      await this.telegram.sendMessage(chatId, '⏳ Membaca total pada struk...');
-      const fileLink = await this.telegram.getFileLink(file.file_id);
-      const { amount, text } = await this.receiptOcr.extractTotal(fileLink);
-      const categories = await this.categories.list(
-        userId,
-        conversation.action as 'income' | 'expense',
-      );
-      const categoryName = this.receiptOcr.detectCategory(
-        text,
-        categories.map((category) => category.name),
-        conversation.action as 'income' | 'expense',
-      );
-      if (!categoryName) {
+      try {
+        await this.telegram.sendMessage(
+          chatId,
+          '⏳ Membaca total pada struk...',
+        );
+        const fileLink = await this.telegram.getFileLink(file.file_id);
+        const { amount, text } = await this.receiptOcr.extractTotal(fileLink);
+        const categories = await this.categories.list(
+          userId,
+          conversation.action as 'income' | 'expense',
+        );
+        const categoryName = this.receiptOcr.detectCategory(
+          text,
+          categories.map((category) => category.name),
+          conversation.action as 'income' | 'expense',
+        );
+        if (!categoryName) {
+          throw new Error(
+            'Belum ada kategori untuk tipe transaksi ini. Buat kategori terlebih dahulu.',
+          );
+        }
+        // OCR berjalan cukup lama. Pengguna dapat membatalkan dari pesan lain;
+        // jangan simpan hasil OCR yang prosesnya sudah dibatalkan/diganti.
+        if (
+          !(await this.isReceiptFlowActive(userId, conversation.data.flowId))
+        ) {
+          return;
+        }
+        const transaction = await this.transactions.create(userId, {
+          type: conversation.action as 'income' | 'expense',
+          walletName: conversation.data.walletName,
+          categoryName,
+          amount,
+          description: 'Dicatat otomatis dari struk',
+        });
+        await this.attachments.createForUser(userId, transaction.id, {
+          telegramFileId: file.file_id,
+          telegramFileUniqueId: file.file_unique_id,
+          fileName: message.document?.file_name,
+          mimeType: message.document?.mime_type,
+          fileSize: file.file_size,
+        });
+        await this.conversations.clear(userId);
         return this.telegram.sendMessage(
           chatId,
-          'Belum ada kategori untuk tipe transaksi ini. Buat kategori terlebih dahulu.',
+          `✅ ${conversation.action === 'income' ? 'Pemasukan' : 'Pengeluaran'} Rp${Number(transaction.amount).toLocaleString('id-ID')} berhasil dicatat dari struk.\nKategori otomatis: ${categoryName}\nWallet: ${conversation.data.walletName}.`,
+          this.mainMenu(),
+        );
+      } catch (error: unknown) {
+        await this.conversations.clear(userId);
+        return this.telegram.sendMessage(
+          chatId,
+          `⚠️ ${this.errorMessage(error)}\n\nProses struk dihentikan. Silakan mulai lagi dari menu utama.`,
+          this.mainMenu(),
         );
       }
-      // OCR berjalan cukup lama. Pengguna dapat membatalkan dari pesan lain;
-      // jangan simpan hasil OCR yang prosesnya sudah dibatalkan/diganti.
-      if (!(await this.isReceiptFlowActive(userId, conversation.data.flowId))) {
-        return;
-      }
-      const transaction = await this.transactions.create(userId, {
-        type: conversation.action as 'income' | 'expense',
-        walletName: conversation.data.walletName,
-        categoryName,
-        amount,
-        description: 'Dicatat otomatis dari struk',
-      });
-      await this.attachments.createForUser(userId, transaction.id, {
-        telegramFileId: file.file_id,
-        telegramFileUniqueId: file.file_unique_id,
-        fileName: message.document?.file_name,
-        mimeType: message.document?.mime_type,
-        fileSize: file.file_size,
-      });
-      await this.conversations.clear(userId);
-      return this.telegram.sendMessage(
-        chatId,
-        `✅ ${conversation.action === 'income' ? 'Pemasukan' : 'Pengeluaran'} Rp${Number(transaction.amount).toLocaleString('id-ID')} berhasil dicatat dari struk.\nKategori otomatis: ${categoryName}\nWallet: ${conversation.data.walletName}.`,
-        this.mainMenu(),
-      );
     }
     if (
       conversation?.action === 'attachment' &&
@@ -183,10 +196,11 @@ export class TelegramController {
   }
 
   private async handleCommand(userId: string, chatId: number, text: string) {
+    const normalizedText = text.trim().toLocaleLowerCase('id-ID');
     if (
-      ['/cancel', '❌ batalkan', '❌ batalkan proses', '⬅️ kembali'].includes(
-        text.toLowerCase(),
-      )
+      normalizedText === '/cancel' ||
+      normalizedText === '/menu' ||
+      /\b(batal|cancel|kembali)\b/u.test(normalizedText)
     ) {
       await this.conversations.clear(userId);
       return this.telegram.sendMessage(
@@ -245,6 +259,13 @@ export class TelegramController {
         return this.telegram.sendMessage(
           chatId,
           this.welcome(),
+          this.mainMenu(),
+        );
+      case '/menu':
+        await this.conversations.clear(userId);
+        return this.telegram.sendMessage(
+          chatId,
+          'Menu utama dibuka kembali.',
           this.mainMenu(),
         );
       case '/help':
