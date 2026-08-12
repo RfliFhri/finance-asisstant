@@ -38,11 +38,20 @@ export class ReceiptOcrService {
     const totalLine = [...lines]
       .reverse()
       .find((line) =>
-        /(?:grand\s*)?total|jumlah\s*(?:akhir|bayar)?|total\s*bayar|dibayar/i.test(
+        /(?:grand\s*)?total|jumlah\s*(?:akhir|bayar|transfer)?|total\s*(?:bayar|transfer)?|dibayar|nominal\s*transfer|transfer\s*(?:berhasil|success(?:ful(?:ly)?)?)/i.test(
           line,
         ),
       );
-    const source = totalLine ?? lines.at(-1) ?? '';
+    const lineIndex = totalLine ? lines.indexOf(totalLine) : -1;
+    // Beberapa bank menaruh label “Nominal Transfer” dan nominalnya di baris berikutnya.
+    const source = [
+      totalLine,
+      lineIndex >= 0 ? lines[lineIndex + 1] : undefined,
+      lineIndex >= 0 ? lines[lineIndex - 1] : undefined,
+      lines.at(-1),
+    ]
+      .filter((line): line is string => Boolean(line))
+      .join(' ');
     const values = [
       ...source.matchAll(
         /(?:rp\.?\s*)?\d{1,3}(?:[.,]\d{3})+(?:[.,]\d{2})?|(?:rp\.?\s*)?\d{3,}/gi,
