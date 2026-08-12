@@ -114,6 +114,11 @@ export class TelegramController {
           'Belum ada kategori untuk tipe transaksi ini. Buat kategori terlebih dahulu.',
         );
       }
+      // OCR berjalan cukup lama. Pengguna dapat membatalkan dari pesan lain;
+      // jangan simpan hasil OCR yang prosesnya sudah dibatalkan/diganti.
+      if (!(await this.isReceiptFlowActive(userId, conversation.data.flowId))) {
+        return;
+      }
       const transaction = await this.transactions.create(userId, {
         type: conversation.action as 'income' | 'expense',
         walletName: conversation.data.walletName,
@@ -178,19 +183,15 @@ export class TelegramController {
   }
 
   private async handleCommand(userId: string, chatId: number, text: string) {
-    if (text.toLowerCase() === '/cancel') {
+    if (
+      ['/cancel', '❌ batalkan', '❌ batalkan proses', '⬅️ kembali'].includes(
+        text.toLowerCase(),
+      )
+    ) {
       await this.conversations.clear(userId);
       return this.telegram.sendMessage(
         chatId,
-        'Input dibatalkan. Pilih menu untuk mulai lagi.',
-        this.mainMenu(),
-      );
-    }
-    if (text === '⬅️ Kembali') {
-      await this.conversations.clear(userId);
-      return this.telegram.sendMessage(
-        chatId,
-        'Kembali ke menu utama.',
+        '✅ Semua proses aktif dibatalkan. Pilih menu untuk mulai lagi.',
         this.mainMenu(),
       );
     }
@@ -437,6 +438,7 @@ export class TelegramController {
   ) {
     await this.conversations.save(userId, action, 'receipt_upload', {
       walletName,
+      flowId: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
     });
     return this.telegram.sendMessage(
       chatId,
@@ -1006,6 +1008,12 @@ export class TelegramController {
     return error instanceof Error ? error.message : 'Terjadi kesalahan.';
   }
 
+  private async isReceiptFlowActive(userId: string, flowId?: string) {
+    if (!flowId) return false;
+    const active = await this.conversations.get(userId);
+    return active?.step === 'receipt_upload' && active.data.flowId === flowId;
+  }
+
   private parseFields(args: string[]) {
     return this.parseTextFields(args.join(' '));
   }
@@ -1026,6 +1034,7 @@ export class TelegramController {
           ['🏷️ Kelola Kategori', '📊 Laporan'],
           ['🧾 Riwayat', '📎 Upload Struk'],
           ['❓ Bantuan'],
+          ['❌ Batalkan Proses'],
         ],
         resize_keyboard: true,
         is_persistent: true,
@@ -1037,7 +1046,7 @@ export class TelegramController {
   private walletMenu(walletNames: string[]) {
     return {
       reply_markup: {
-        keyboard: [...walletNames.map((name) => [name]), ['⬅️ Kembali']],
+        keyboard: [...walletNames.map((name) => [name]), this.cancelMenuRow()],
         resize_keyboard: true,
         one_time_keyboard: true,
       },
@@ -1050,7 +1059,8 @@ export class TelegramController {
         keyboard: [
           ['💼 Wallet Saya', '➕ Tambah Rekening'],
           ['✏️ Ubah Nama Rekening', '🗑 Hapus Rekening'],
-          ['❓ Bantuan', '⬅️ Kembali'],
+          ['❓ Bantuan'],
+          this.cancelMenuRow(),
         ],
         resize_keyboard: true,
       },
@@ -1062,7 +1072,8 @@ export class TelegramController {
       reply_markup: {
         keyboard: [
           ['➕ Kategori Pemasukan', '➖ Kategori Pengeluaran'],
-          ['❓ Bantuan', '⬅️ Kembali'],
+          ['❓ Bantuan'],
+          this.cancelMenuRow(),
         ],
         resize_keyboard: true,
       },
@@ -1075,7 +1086,8 @@ export class TelegramController {
         keyboard: [
           ['📅 Hari ini', '📅 Minggu ini'],
           ['📅 Bulan ini', '📅 Tahun ini'],
-          ['❓ Bantuan', '⬅️ Kembali'],
+          ['❓ Bantuan'],
+          this.cancelMenuRow(),
         ],
         resize_keyboard: true,
         one_time_keyboard: true,
@@ -1086,7 +1098,7 @@ export class TelegramController {
   private attachmentMenu(labels: string[]) {
     return {
       reply_markup: {
-        keyboard: [...labels.map((label) => [label]), ['⬅️ Kembali']],
+        keyboard: [...labels.map((label) => [label]), this.cancelMenuRow()],
         resize_keyboard: true,
         one_time_keyboard: true,
       },
@@ -1096,7 +1108,7 @@ export class TelegramController {
   private receiptTypeMenu() {
     return {
       reply_markup: {
-        keyboard: [['➕ Pemasukan', '➖ Pengeluaran'], ['⬅️ Kembali']],
+        keyboard: [['➕ Pemasukan', '➖ Pengeluaran'], this.cancelMenuRow()],
         resize_keyboard: true,
         one_time_keyboard: true,
       },
@@ -1106,7 +1118,7 @@ export class TelegramController {
   private confirmDeleteMenu() {
     return {
       reply_markup: {
-        keyboard: [['✅ Ya, hapus', '❌ Tidak, batal'], ['⬅️ Kembali']],
+        keyboard: [['✅ Ya, hapus', '❌ Tidak, batal'], this.cancelMenuRow()],
         resize_keyboard: true,
         one_time_keyboard: true,
       },
@@ -1116,7 +1128,10 @@ export class TelegramController {
   private categoryMenu(categoryNames: string[]) {
     return {
       reply_markup: {
-        keyboard: [...categoryNames.map((name) => [name]), ['⬅️ Kembali']],
+        keyboard: [
+          ...categoryNames.map((name) => [name]),
+          this.cancelMenuRow(),
+        ],
         resize_keyboard: true,
         one_time_keyboard: true,
       },
@@ -1129,7 +1144,7 @@ export class TelegramController {
         keyboard: [
           ['10000', '25000', '50000'],
           ['100000', '500000'],
-          ['⬅️ Kembali'],
+          this.cancelMenuRow(),
         ],
         resize_keyboard: true,
         one_time_keyboard: true,
@@ -1140,7 +1155,7 @@ export class TelegramController {
   private descriptionMenu() {
     return {
       reply_markup: {
-        keyboard: [['⏭ Lewati keterangan'], ['⬅️ Kembali']],
+        keyboard: [['⏭ Lewati keterangan'], this.cancelMenuRow()],
         resize_keyboard: true,
         one_time_keyboard: true,
       },
@@ -1150,11 +1165,15 @@ export class TelegramController {
   private backMenu() {
     return {
       reply_markup: {
-        keyboard: [['⬅️ Kembali']],
+        keyboard: [this.cancelMenuRow()],
         resize_keyboard: true,
         one_time_keyboard: true,
       },
     };
+  }
+
+  private cancelMenuRow() {
+    return ['⬅️ Kembali', '❌ Batalkan'];
   }
 
   private welcome() {
