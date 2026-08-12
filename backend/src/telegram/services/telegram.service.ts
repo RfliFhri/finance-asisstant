@@ -62,6 +62,10 @@ export class TelegramService implements OnModuleInit {
     return this.bot.getMe();
   }
 
+  async getFileLink(fileId: string) {
+    return this.bot.getFileLink(fileId);
+  }
+
   async setWebhook(url: string) {
     return this.bot.setWebHook(url);
   }

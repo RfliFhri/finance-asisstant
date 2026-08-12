@@ -46,6 +46,7 @@ enum ConversationStep {
   category_name
   attachment_transaction
   attachment_upload
+  receipt_upload
 }
 
 model User {

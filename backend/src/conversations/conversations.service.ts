@@ -27,7 +27,8 @@ export type ConversationStep =
   | 'wallet_delete_confirm'
   | 'category_name'
   | 'attachment_transaction'
-  | 'attachment_upload';
+  | 'attachment_upload'
+  | 'receipt_upload';
 
 export interface ActiveConversation {
   action: ConversationAction;

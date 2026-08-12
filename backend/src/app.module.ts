@@ -14,6 +14,7 @@ import { TransactionsModule } from './transactions/transactions.module';
 import { AttachmentsModule } from './attachments/attachments.module';
 import { ReportsModule } from './reports/reports.module';
 import { ConversationsModule } from './conversations/conversations.module';
+import { OcrModule } from './ocr/ocr.module';
 
 @Module({
   imports: [
@@ -34,6 +35,7 @@ import { ConversationsModule } from './conversations/conversations.module';
     AttachmentsModule,
     ReportsModule,
     ConversationsModule,
+    OcrModule,
   ],
 })
 export class AppModule {}

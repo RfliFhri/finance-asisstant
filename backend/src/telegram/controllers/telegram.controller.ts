@@ -20,6 +20,7 @@ import {
   ActiveConversation,
   ConversationsService,
 } from '../../conversations/conversations.service';
+import { ReceiptOcrService } from '../../ocr/receipt-ocr.service';
 
 @Controller('telegram')
 export class TelegramController {
@@ -35,6 +36,7 @@ export class TelegramController {
     private readonly attachments: AttachmentsService,
     private readonly config: ConfigService,
     private readonly conversations: ConversationsService,
+    private readonly receiptOcr: ReceiptOcrService,
   ) {}
 
   @Post('webhook')
@@ -76,6 +78,42 @@ export class TelegramController {
   private async handleAttachment(userId: string, chatId: number, message: any) {
     const conversation = await this.conversations.get(userId);
     const file = message.document ?? message.photo?.[message.photo.length - 1];
+    if (conversation?.step === 'receipt_upload') {
+      if (!file)
+        return this.telegram.sendMessage(chatId, 'Foto struk tidak ditemukan.');
+      if (
+        message.document &&
+        !message.document.mime_type?.startsWith('image/')
+      ) {
+        return this.telegram.sendMessage(
+          chatId,
+          'Saat ini pembacaan otomatis mendukung foto struk (JPG/PNG), bukan PDF.',
+        );
+      }
+      await this.telegram.sendMessage(chatId, '⏳ Membaca total pada struk...');
+      const fileLink = await this.telegram.getFileLink(file.file_id);
+      const { amount } = await this.receiptOcr.extractTotal(fileLink);
+      const transaction = await this.transactions.create(userId, {
+        type: conversation.action as 'income' | 'expense',
+        walletName: conversation.data.walletName,
+        categoryName: conversation.data.categoryName,
+        amount,
+        description: 'Dicatat otomatis dari struk',
+      });
+      await this.attachments.createForUser(userId, transaction.id, {
+        telegramFileId: file.file_id,
+        telegramFileUniqueId: file.file_unique_id,
+        fileName: message.document?.file_name,
+        mimeType: message.document?.mime_type,
+        fileSize: file.file_size,
+      });
+      await this.conversations.clear(userId);
+      return this.telegram.sendMessage(
+        chatId,
+        `✅ ${conversation.action === 'income' ? 'Pemasukan' : 'Pengeluaran'} Rp${Number(transaction.amount).toLocaleString('id-ID')} berhasil dicatat dari struk di ${conversation.data.walletName}.`,
+        this.mainMenu(),
+      );
+    }
     if (
       conversation?.action === 'attachment' &&
       conversation.step === 'attachment_upload'
@@ -160,7 +198,7 @@ export class TelegramController {
     if (text === '📅 Tahun ini')
       return this.reportCommand(userId, chatId, 'yearly');
     if (text === '📎 Upload Struk')
-      return this.startAttachmentFlow(userId, chatId);
+      return this.startReceiptFlow(userId, chatId);
 
     if (!text.startsWith('/')) {
       const conversation = await this.conversations.get(userId);
@@ -326,6 +364,48 @@ export class TelegramController {
     );
   }
 
+  private async startReceiptFlow(userId: string, chatId: number) {
+    await this.conversations.save(userId, 'attachment', 'receipt_upload', {
+      awaitingType: 'true',
+    });
+    return this.telegram.sendMessage(
+      chatId,
+      'Pilih tipe transaksi untuk struk ini:',
+      this.receiptTypeMenu(),
+    );
+  }
+
+  private async startReceiptTransaction(
+    userId: string,
+    chatId: number,
+    action: 'income' | 'expense',
+  ) {
+    const wallets = await this.wallets.listWithBalances(userId);
+    if (!wallets.length) {
+      return this.telegram.sendMessage(
+        chatId,
+        'Belum ada wallet. Buat dulu dengan /wallet add Nama.',
+      );
+    }
+    if (wallets.length === 1) {
+      return this.askTransactionCategory(
+        userId,
+        chatId,
+        action,
+        wallets[0].name,
+        true,
+      );
+    }
+    await this.conversations.save(userId, action, 'transaction_wallet', {
+      receipt: 'true',
+    });
+    return this.telegram.sendMessage(
+      chatId,
+      'Pilih rekening/wallet untuk transaksi dari struk:',
+      this.walletMenu(wallets.map((wallet) => wallet.name)),
+    );
+  }
+
   private async startTransactionFlow(
     userId: string,
     chatId: number,
@@ -359,6 +439,7 @@ export class TelegramController {
     chatId: number,
     action: 'income' | 'expense',
     walletName: string,
+    receipt = false,
   ) {
     const categories = await this.categories.list(userId, action);
     if (!categories.length) {
@@ -369,6 +450,7 @@ export class TelegramController {
     }
     await this.conversations.save(userId, action, 'transaction_category', {
       walletName,
+      ...(receipt ? { receipt: 'true' } : {}),
     });
     return this.telegram.sendMessage(
       chatId,
@@ -399,6 +481,20 @@ export class TelegramController {
     text: string,
     conversation: ActiveConversation,
   ) {
+    if (
+      conversation.step === 'receipt_upload' &&
+      conversation.data.awaitingType === 'true'
+    ) {
+      if (text === '➕ Pemasukan')
+        return this.startReceiptTransaction(userId, chatId, 'income');
+      if (text === '➖ Pengeluaran')
+        return this.startReceiptTransaction(userId, chatId, 'expense');
+      return this.telegram.sendMessage(
+        chatId,
+        'Pilih tipe transaksi menggunakan tombol yang tersedia.',
+        this.receiptTypeMenu(),
+      );
+    }
     if (conversation.step === 'wallet_name') {
       const wallet = await this.wallets.create(userId, { name: text });
       await this.conversations.clear(userId);
@@ -496,6 +592,7 @@ export class TelegramController {
         chatId,
         conversation.action as 'income' | 'expense',
         wallet.name,
+        conversation.data.receipt === 'true',
       );
     }
 
@@ -505,12 +602,20 @@ export class TelegramController {
         conversation.action as 'income' | 'expense',
         text,
       );
-      await this.conversations.save(
-        userId,
-        conversation.action,
-        'transaction_amount',
-        { ...conversation.data, categoryName: category.name },
-      );
+      const nextStep =
+        conversation.data.receipt === 'true'
+          ? 'receipt_upload'
+          : 'transaction_amount';
+      await this.conversations.save(userId, conversation.action, nextStep, {
+        ...conversation.data,
+        categoryName: category.name,
+      });
+      if (nextStep === 'receipt_upload') {
+        return this.telegram.sendMessage(
+          chatId,
+          `Kategori terpilih: ${category.name}.\n\nSekarang kirim foto struknya. Total akan dibaca dan transaksi otomatis dicatat.`,
+        );
+      }
       return this.telegram.sendMessage(
         chatId,
         `Kategori terpilih: ${category.name}.\n\nMasukkan nominalnya saja.\nContoh: 150000`,
@@ -937,6 +1042,16 @@ export class TelegramController {
     return {
       reply_markup: {
         keyboard: [...labels.map((label) => [label]), ['/cancel']],
+        resize_keyboard: true,
+        one_time_keyboard: true,
+      },
+    };
+  }
+
+  private receiptTypeMenu() {
+    return {
+      reply_markup: {
+        keyboard: [['➕ Pemasukan', '➖ Pengeluaran'], ['/cancel']],
         resize_keyboard: true,
         one_time_keyboard: true,
       },

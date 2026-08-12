@@ -19,12 +19,17 @@ export class WalletsService {
 
   async create(userId: string, input: CreateWalletInput) {
     const count = await this.prisma.wallet.count({ where: { userId } });
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { currency: true },
+    });
     try {
       return await this.prisma.wallet.create({
         data: {
           ...input,
           name: input.name.trim(),
           userId,
+          currency: input.currency ?? user?.currency ?? 'IDR',
           isDefault: count === 0,
         },
       });

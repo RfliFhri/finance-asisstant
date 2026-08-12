@@ -9,6 +9,7 @@ import { TransactionsModule } from '../transactions/transactions.module';
 import { ReportsModule } from '../reports/reports.module';
 import { AttachmentsModule } from '../attachments/attachments.module';
 import { ConversationsModule } from '../conversations/conversations.module';
+import { OcrModule } from '../ocr/ocr.module';
 
 @Module({
   imports: [
@@ -19,6 +20,7 @@ import { ConversationsModule } from '../conversations/conversations.module';
     ReportsModule,
     AttachmentsModule,
     ConversationsModule,
+    OcrModule,
   ],
   controllers: [TelegramController],
   providers: [TelegramService],

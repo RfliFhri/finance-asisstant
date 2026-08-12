@@ -33,4 +33,8 @@ export class UsersService {
       },
     });
   }
+
+  async setCurrency(userId: string, currency: 'IDR' | 'JPY') {
+    return this.prisma.user.update({ where: { id: userId }, data: { currency } });
+  }
 }
