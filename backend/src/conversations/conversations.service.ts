@@ -21,6 +21,8 @@ export type ConversationStep =
   | 'transfer_details'
   | 'transfer_description'
   | 'wallet_name'
+  | 'wallet_currency'
+  | 'wallet_select_currency'
   | 'wallet_select_rename'
   | 'wallet_new_name'
   | 'wallet_select_delete'

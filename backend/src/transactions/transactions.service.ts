@@ -64,6 +64,11 @@ export class TransactionsService {
     ]);
     if (fromWallet.id === toWallet.id)
       throw new BadRequestException('Wallet asal dan tujuan harus berbeda.');
+    if (fromWallet.currency !== toWallet.currency) {
+      throw new BadRequestException(
+        'Transfer antar mata uang belum didukung. Buat transaksi terpisah setelah mengonversi nominalnya.',
+      );
+    }
     return this.prisma.transaction.create({
       data: {
         userId,

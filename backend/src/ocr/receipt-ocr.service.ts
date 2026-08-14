@@ -6,8 +6,12 @@ export class ReceiptOcrService {
   /** Reads a receipt image locally with Tesseract.js and returns its detected total. */
   async extractTotal(
     imageUrl: string,
+    currency: 'IDR' | 'JPY' = 'IDR',
   ): Promise<{ amount: number; text: string }> {
-    const recognition = recognize(imageUrl, 'ind+eng');
+    const recognition = recognize(
+      imageUrl,
+      currency === 'JPY' ? 'jpn+eng' : 'ind+eng',
+    );
     const timeout = new Promise<never>((_, reject) => {
       setTimeout(
         () =>
@@ -38,7 +42,7 @@ export class ReceiptOcrService {
     const totalLine = [...lines]
       .reverse()
       .find((line) =>
-        /(?:grand\s*)?total|jumlah\s*(?:akhir|bayar|transfer)?|total\s*(?:bayar|transfer)?|dibayar|nominal\s*transfer|transfer\s*(?:berhasil|success(?:ful(?:ly)?)?)/i.test(
+        /(?:grand\s*)?total|jumlah\s*(?:akhir|bayar|transfer)?|total\s*(?:bayar|transfer)?|dibayar|nominal\s*transfer|transfer\s*(?:berhasil|success(?:ful(?:ly)?)?)|合計|お支払い|支払(?:金額|合計)?|振込(?:金額|額|完了)?|送金(?:金額|完了)?/i.test(
           line,
         ),
       );

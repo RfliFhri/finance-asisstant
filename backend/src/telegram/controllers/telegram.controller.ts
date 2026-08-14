@@ -1,3 +1,5 @@
+/* eslint-disable @typescript-eslint/no-unsafe-member-access */
+/* eslint-disable @typescript-eslint/no-unsafe-call */
 import {
   Body,
   Controller,
@@ -21,6 +23,7 @@ import {
   ConversationsService,
 } from '../../conversations/conversations.service';
 import { ReceiptOcrService } from '../../ocr/receipt-ocr.service';
+import { TelegramMenuService } from '../services/telegram-menu.service';
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 import TelegramBot = require('node-telegram-bot-api');
 
@@ -39,6 +42,7 @@ export class TelegramController {
     private readonly config: ConfigService,
     private readonly conversations: ConversationsService,
     private readonly receiptOcr: ReceiptOcrService,
+    private readonly menus: TelegramMenuService,
   ) {}
 
   @Post('webhook')
@@ -102,7 +106,10 @@ export class TelegramController {
           '⏳ Membaca total pada struk...',
         );
         const fileLink = await this.telegram.getFileLink(file.file_id);
-        const { amount, text } = await this.receiptOcr.extractTotal(fileLink);
+        const { amount, text } = await this.receiptOcr.extractTotal(
+          fileLink,
+          conversation.data.walletCurrency === 'JPY' ? 'JPY' : 'IDR',
+        );
         const categories = await this.categories.list(
           userId,
           conversation.action as 'income' | 'expense',
@@ -141,7 +148,7 @@ export class TelegramController {
         await this.conversations.clear(userId);
         return this.telegram.sendMessage(
           chatId,
-          `✅ ${conversation.action === 'income' ? 'Pemasukan' : 'Pengeluaran'} Rp${Number(transaction.amount).toLocaleString('id-ID')} berhasil dicatat dari struk.\nKategori otomatis: ${categoryName}\nWallet: ${conversation.data.walletName}.`,
+          `✅ ${conversation.action === 'income' ? 'Pemasukan' : 'Pengeluaran'} ${this.formatAmount(transaction.amount, transaction.wallet.currency)} berhasil dicatat dari struk.\nKategori otomatis: ${categoryName}\nWallet: ${conversation.data.walletName}.`,
           this.mainMenu(),
         );
       } catch (error: unknown) {
@@ -232,6 +239,8 @@ export class TelegramController {
       return this.startWalletName(userId, chatId);
     if (text === '✏️ Ubah Nama Rekening')
       return this.startWalletRename(userId, chatId);
+    if (text === '💱 Ubah Mata Uang Rekening')
+      return this.startWalletCurrencyChange(userId, chatId);
     if (text === '🗑 Hapus Rekening')
       return this.startWalletDelete(userId, chatId);
     if (text === '🏷️ Kelola Kategori') return this.showCategoryMenu(chatId);
@@ -250,6 +259,11 @@ export class TelegramController {
       return this.reportCommand(userId, chatId, 'yearly');
     if (text === '📎 Upload Struk')
       return this.startReceiptFlow(userId, chatId);
+    if (text === '⚙️ Pengaturan') return this.showSettingsMenu(chatId);
+    if (text === '🇮🇩 Rupiah (IDR)')
+      return this.setCurrency(userId, chatId, 'IDR');
+    if (text === '🇯🇵 Yen Jepang (JPY)')
+      return this.setCurrency(userId, chatId, 'JPY');
 
     if (!text.startsWith('/')) {
       const conversation = await this.conversations.get(userId);
@@ -340,6 +354,22 @@ export class TelegramController {
     );
   }
 
+  private async startWalletCurrencyChange(userId: string, chatId: number) {
+    const wallets = await this.wallets.listWithBalances(userId);
+    if (!wallets.length) {
+      return this.telegram.sendMessage(
+        chatId,
+        'Belum ada wallet untuk diubah.',
+      );
+    }
+    await this.conversations.save(userId, 'wallet', 'wallet_select_currency');
+    return this.telegram.sendMessage(
+      chatId,
+      'Pilih wallet yang mata uangnya ingin diubah:',
+      this.walletMenu(wallets.map((wallet) => wallet.name)),
+    );
+  }
+
   private async startWalletRename(userId: string, chatId: number) {
     const wallets = await this.wallets.listWithBalances(userId);
     if (!wallets.length)
@@ -396,6 +426,27 @@ export class TelegramController {
     );
   }
 
+  private showSettingsMenu(chatId: number) {
+    return this.telegram.sendMessage(
+      chatId,
+      'Pilih mata uang default akun. Setiap wallet tetap dapat memakai mata uangnya sendiri.',
+      this.currencyMenu(),
+    );
+  }
+
+  private async setCurrency(
+    userId: string,
+    chatId: number,
+    currency: 'IDR' | 'JPY',
+  ) {
+    await this.users.setCurrency(userId, currency);
+    return this.telegram.sendMessage(
+      chatId,
+      `✅ Mata uang berhasil diubah ke ${currency === 'JPY' ? 'Yen Jepang (¥)' : 'Rupiah (Rp)'}.`,
+      this.mainMenu(),
+    );
+  }
+
   private async startAttachmentFlow(userId: string, chatId: number) {
     const transactions = await this.transactions.recent(userId, 10);
     if (!transactions.length) {
@@ -406,7 +457,7 @@ export class TelegramController {
     }
     const buttons: Record<string, string> = {};
     for (const [index, transaction] of transactions.entries()) {
-      const label = `${index + 1}. ${transaction.type === 'income' ? 'Pemasukan' : transaction.type === 'expense' ? 'Pengeluaran' : 'Transfer'} · Rp${Number(transaction.amount).toLocaleString('id-ID')}`;
+      const label = `${index + 1}. ${transaction.type === 'income' ? 'Pemasukan' : transaction.type === 'expense' ? 'Pengeluaran' : 'Transfer'} · ${this.formatAmount(transaction.amount, transaction.wallet.currency)}`;
       buttons[label] = transaction.id;
     }
     await this.conversations.save(
@@ -446,7 +497,13 @@ export class TelegramController {
       );
     }
     if (wallets.length === 1) {
-      return this.startReceiptUpload(userId, chatId, action, wallets[0].name);
+      return this.startReceiptUpload(
+        userId,
+        chatId,
+        action,
+        wallets[0].name,
+        wallets[0].currency,
+      );
     }
     await this.conversations.save(userId, action, 'transaction_wallet', {
       receipt: 'true',
@@ -463,9 +520,11 @@ export class TelegramController {
     chatId: number,
     action: 'income' | 'expense',
     walletName: string,
+    walletCurrency: string,
   ) {
     await this.conversations.save(userId, action, 'receipt_upload', {
       walletName,
+      walletCurrency,
       flowId: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
     });
     return this.telegram.sendMessage(
@@ -563,12 +622,62 @@ export class TelegramController {
       );
     }
     if (conversation.step === 'wallet_name') {
-      const wallet = await this.wallets.create(userId, { name: text });
+      await this.conversations.save(userId, 'wallet', 'wallet_currency', {
+        walletName: text,
+      });
+      return this.telegram.sendMessage(
+        chatId,
+        'Pilih mata uang untuk rekening baru:',
+        this.walletCurrencyMenu(),
+      );
+    }
+
+    if (conversation.step === 'wallet_currency') {
+      const currency =
+        text === '💴 Wallet Yen (JPY)'
+          ? 'JPY'
+          : text === '💴 Wallet Rupiah (IDR)'
+            ? 'IDR'
+            : null;
+      if (!currency) {
+        return this.telegram.sendMessage(
+          chatId,
+          'Pilih mata uang menggunakan tombol yang tersedia.',
+          this.walletCurrencyMenu(),
+        );
+      }
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+      const wallet =
+        conversation.data.changeCurrency === 'true'
+          ? await this.wallets.updateCurrency(
+              userId,
+              conversation.data.walletName,
+              currency,
+            )
+          : await this.wallets.create(userId, {
+              name: conversation.data.walletName,
+              currency,
+            });
       await this.conversations.clear(userId);
       return this.telegram.sendMessage(
         chatId,
-        `✅ Rekening ${wallet.name} berhasil ditambahkan.`,
+        conversation.data.changeCurrency === 'true'
+          ? `✅ Mata uang wallet ${wallet.name} diubah ke ${currency}.`
+          : `✅ Rekening ${wallet.name} berhasil ditambahkan.`,
         this.mainMenu(),
+      );
+    }
+
+    if (conversation.step === 'wallet_select_currency') {
+      const wallet = await this.wallets.findByName(userId, text);
+      await this.conversations.save(userId, 'wallet', 'wallet_currency', {
+        walletName: wallet.name,
+        changeCurrency: 'true',
+      });
+      return this.telegram.sendMessage(
+        chatId,
+        `Pilih mata uang baru untuk ${wallet.name}:`,
+        this.walletCurrencyMenu(),
       );
     }
 
@@ -660,6 +769,7 @@ export class TelegramController {
           chatId,
           conversation.action as 'income' | 'expense',
           wallet.name,
+          wallet.currency,
         );
       }
       return this.askTransactionCategory(
@@ -726,7 +836,7 @@ export class TelegramController {
       await this.conversations.clear(userId);
       return this.telegram.sendMessage(
         chatId,
-        `✅ ${conversation.action === 'income' ? 'Pemasukan' : 'Pengeluaran'} Rp${Number(transaction.amount).toLocaleString('id-ID')} tersimpan di ${conversation.data.walletName}.`,
+        `✅ ${conversation.action === 'income' ? 'Pemasukan' : 'Pengeluaran'} ${this.formatAmount(transaction.amount, transaction.wallet.currency)} tersimpan di ${conversation.data.walletName}.`,
         this.mainMenu(),
       );
     }
@@ -750,7 +860,7 @@ export class TelegramController {
       await this.conversations.clear(userId);
       return this.telegram.sendMessage(
         chatId,
-        `✅ ${conversation.action === 'income' ? 'Pemasukan' : 'Pengeluaran'} Rp${Number(transaction.amount).toLocaleString('id-ID')} tersimpan di ${conversation.data.walletName}.`,
+        `✅ ${conversation.action === 'income' ? 'Pemasukan' : 'Pengeluaran'} ${this.formatAmount(transaction.amount, transaction.wallet.currency)} tersimpan di ${conversation.data.walletName}.`,
         this.mainMenu(),
       );
     }
@@ -833,7 +943,7 @@ export class TelegramController {
     await this.conversations.clear(userId);
     return this.telegram.sendMessage(
       chatId,
-      `✅ Transfer Rp${Number(transaction.amount).toLocaleString('id-ID')} tersimpan.`,
+      `✅ Transfer ${this.formatAmount(transaction.amount, transaction.wallet.currency)} tersimpan.`,
       this.mainMenu(),
     );
   }
@@ -870,7 +980,7 @@ export class TelegramController {
     const lines = wallets.length
       ? wallets.map(
           (wallet) =>
-            `${wallet.isDefault ? '⭐ ' : ''}${wallet.name}: Rp${wallet.balance.toLocaleString('id-ID')}`,
+            `${wallet.isDefault ? '⭐ ' : ''}${wallet.name}: ${this.formatAmount(wallet.balance, wallet.currency)}`,
         )
       : ['Belum ada wallet. Gunakan /wallet add Cash'];
     return this.telegram.sendMessage(
@@ -955,7 +1065,7 @@ export class TelegramController {
     });
     return this.telegram.sendMessage(
       chatId,
-      `✅ ${type === 'income' ? 'Pemasukan' : 'Pengeluaran'} Rp${Number(transaction.amount).toLocaleString('id-ID')} tersimpan.`,
+      `✅ ${type === 'income' ? 'Pemasukan' : 'Pengeluaran'} ${this.formatAmount(transaction.amount, transaction.wallet.currency)} tersimpan.`,
     );
   }
 
@@ -979,7 +1089,7 @@ export class TelegramController {
     });
     return this.telegram.sendMessage(
       chatId,
-      `✅ Transfer Rp${Number(transaction.amount).toLocaleString('id-ID')} tersimpan.`,
+      `✅ Transfer ${this.formatAmount(transaction.amount, transaction.wallet.currency)} tersimpan.`,
     );
   }
 
@@ -1002,9 +1112,10 @@ export class TelegramController {
       );
     }
     const report = await reports[selected]();
+    const user = await this.users.findById(userId);
     return this.telegram.sendMessage(
       chatId,
-      `📊 *Laporan ${selected}*\nPemasukan: Rp${report.income.toLocaleString('id-ID')}\nPengeluaran: Rp${report.expense.toLocaleString('id-ID')}\nNeto: Rp${report.net.toLocaleString('id-ID')}`,
+      `📊 *Laporan ${selected}*\nPemasukan: ${this.formatAmount(report.income, user.currency)}\nPengeluaran: ${this.formatAmount(report.expense, user.currency)}\nNeto: ${this.formatAmount(report.net, user.currency)}`,
       this.mainMenu(),
     );
   }
@@ -1014,7 +1125,7 @@ export class TelegramController {
     const lines = items.length
       ? items.map(
           (item) =>
-            `${item.type === 'income' ? '➕' : item.type === 'expense' ? '➖' : '↔️'} ${item.wallet.name} · Rp${Number(item.amount).toLocaleString('id-ID')} · ${item.description}\nID: ${item.id}`,
+            `${item.type === 'income' ? '➕' : item.type === 'expense' ? '➖' : '↔️'} ${item.wallet.name} · ${this.formatAmount(item.amount, item.wallet.currency)} · ${item.description}\nID: ${item.id}`,
         )
       : ['Belum ada transaksi.'];
     return this.telegram.sendMessage(
@@ -1034,6 +1145,18 @@ export class TelegramController {
 
   private errorMessage(error: unknown) {
     return error instanceof Error ? error.message : 'Terjadi kesalahan.';
+  }
+
+  private formatAmount(
+    amount: number | { toString(): string },
+    currency: string,
+  ) {
+    const isYen = currency === 'JPY';
+    return new Intl.NumberFormat(isYen ? 'ja-JP' : 'id-ID', {
+      style: 'currency',
+      currency: isYen ? 'JPY' : 'IDR',
+      maximumFractionDigits: 0,
+    }).format(Number(amount));
   }
 
   private async isReceiptFlowActive(userId: string, flowId?: string) {
@@ -1061,8 +1184,7 @@ export class TelegramController {
           ['↔️ Transfer', '💼 Kelola Wallet'],
           ['🏷️ Kelola Kategori', '📊 Laporan'],
           ['🧾 Riwayat', '📎 Upload Struk'],
-          ['❓ Bantuan'],
-          ['❌ Batalkan Proses'],
+          ['⚙️ Pengaturan', '❓ Bantuan'],
         ],
         resize_keyboard: true,
         is_persistent: true,
@@ -1074,7 +1196,7 @@ export class TelegramController {
   private walletMenu(walletNames: string[]) {
     return {
       reply_markup: {
-        keyboard: [...walletNames.map((name) => [name]), this.cancelMenuRow()],
+        keyboard: [...walletNames.map((name) => [name]), ['⬅️ Kembali']],
         resize_keyboard: true,
         one_time_keyboard: true,
       },
@@ -1086,9 +1208,10 @@ export class TelegramController {
       reply_markup: {
         keyboard: [
           ['💼 Wallet Saya', '➕ Tambah Rekening'],
-          ['✏️ Ubah Nama Rekening', '🗑 Hapus Rekening'],
+          ['✏️ Ubah Nama Rekening', '💱 Ubah Mata Uang Rekening'],
+          ['🗑 Hapus Rekening'],
           ['❓ Bantuan'],
-          this.cancelMenuRow(),
+          ['⬅️ Kembali'],
         ],
         resize_keyboard: true,
       },
@@ -1101,7 +1224,7 @@ export class TelegramController {
         keyboard: [
           ['➕ Kategori Pemasukan', '➖ Kategori Pengeluaran'],
           ['❓ Bantuan'],
-          this.cancelMenuRow(),
+          ['⬅️ Kembali'],
         ],
         resize_keyboard: true,
       },
@@ -1115,7 +1238,7 @@ export class TelegramController {
           ['📅 Hari ini', '📅 Minggu ini'],
           ['📅 Bulan ini', '📅 Tahun ini'],
           ['❓ Bantuan'],
-          this.cancelMenuRow(),
+          ['⬅️ Kembali'],
         ],
         resize_keyboard: true,
         one_time_keyboard: true,
@@ -1126,7 +1249,7 @@ export class TelegramController {
   private attachmentMenu(labels: string[]) {
     return {
       reply_markup: {
-        keyboard: [...labels.map((label) => [label]), this.cancelMenuRow()],
+        keyboard: [...labels.map((label) => [label]), ['⬅️ Kembali']],
         resize_keyboard: true,
         one_time_keyboard: true,
       },
@@ -1136,7 +1259,7 @@ export class TelegramController {
   private receiptTypeMenu() {
     return {
       reply_markup: {
-        keyboard: [['➕ Pemasukan', '➖ Pengeluaran'], this.cancelMenuRow()],
+        keyboard: [['➕ Pemasukan', '➖ Pengeluaran'], ['⬅️ Kembali']],
         resize_keyboard: true,
         one_time_keyboard: true,
       },
@@ -1146,7 +1269,7 @@ export class TelegramController {
   private confirmDeleteMenu() {
     return {
       reply_markup: {
-        keyboard: [['✅ Ya, hapus', '❌ Tidak, batal'], this.cancelMenuRow()],
+        keyboard: [['✅ Ya, hapus', '❌ Tidak, batal'], ['⬅️ Kembali']],
         resize_keyboard: true,
         one_time_keyboard: true,
       },
@@ -1156,10 +1279,7 @@ export class TelegramController {
   private categoryMenu(categoryNames: string[]) {
     return {
       reply_markup: {
-        keyboard: [
-          ...categoryNames.map((name) => [name]),
-          this.cancelMenuRow(),
-        ],
+        keyboard: [...categoryNames.map((name) => [name]), ['⬅️ Kembali']],
         resize_keyboard: true,
         one_time_keyboard: true,
       },
@@ -1172,7 +1292,7 @@ export class TelegramController {
         keyboard: [
           ['10000', '25000', '50000'],
           ['100000', '500000'],
-          this.cancelMenuRow(),
+          ['⬅️ Kembali'],
         ],
         resize_keyboard: true,
         one_time_keyboard: true,
@@ -1183,7 +1303,7 @@ export class TelegramController {
   private descriptionMenu() {
     return {
       reply_markup: {
-        keyboard: [['⏭ Lewati keterangan'], this.cancelMenuRow()],
+        keyboard: [['⏭ Lewati keterangan'], ['⬅️ Kembali']],
         resize_keyboard: true,
         one_time_keyboard: true,
       },
@@ -1193,15 +1313,34 @@ export class TelegramController {
   private backMenu() {
     return {
       reply_markup: {
-        keyboard: [this.cancelMenuRow()],
+        keyboard: [['⬅️ Kembali']],
         resize_keyboard: true,
         one_time_keyboard: true,
       },
     };
   }
 
-  private cancelMenuRow() {
-    return ['⬅️ Kembali', '❌ Batalkan'];
+  private currencyMenu() {
+    return {
+      reply_markup: {
+        keyboard: [['🇮🇩 Rupiah (IDR)', '🇯🇵 Yen Jepang (JPY)'], ['⬅️ Kembali']],
+        resize_keyboard: true,
+        one_time_keyboard: true,
+      },
+    };
+  }
+
+  private walletCurrencyMenu() {
+    return {
+      reply_markup: {
+        keyboard: [
+          ['💴 Wallet Rupiah (IDR)', '💴 Wallet Yen (JPY)'],
+          ['⬅️ Kembali'],
+        ],
+        resize_keyboard: true,
+        one_time_keyboard: true,
+      },
+    };
   }
 
   private welcome() {

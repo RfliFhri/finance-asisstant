@@ -124,6 +124,24 @@ export class WalletsService {
     }
   }
 
+  async updateCurrency(userId: string, name: string, currency: 'IDR' | 'JPY') {
+    const wallet = await this.findByName(userId, name);
+    const transactionCount = await this.prisma.transaction.count({
+      where: {
+        OR: [{ walletId: wallet.id }, { transferWalletId: wallet.id }],
+      },
+    });
+    if (transactionCount) {
+      throw new BadRequestException(
+        'Mata uang wallet yang sudah memiliki transaksi tidak dapat diubah. Buat wallet baru agar riwayat tetap akurat.',
+      );
+    }
+    return this.prisma.wallet.update({
+      where: { id: wallet.id },
+      data: { currency },
+    });
+  }
+
   async delete(userId: string, name: string) {
     const wallet = await this.findByName(userId, name);
     try {
